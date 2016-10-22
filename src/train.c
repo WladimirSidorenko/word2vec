@@ -40,6 +40,20 @@ typedef struct {
 /////////////
 // Methods //
 /////////////
+static void copy_thread_opts(const thread_opts_t *src_opts,
+                             thread_opts_t *trg_opts, long a_thread_id) {
+  trg_opts->m_start = clock();
+  trg_opts->m_file_size = src_opts->m_file_size;
+  trg_opts->m_alpha = src_opts->m_alpha;
+  trg_opts->m_starting_alpha = src_opts->m_starting_alpha;
+  trg_opts->m_thread_id = a_thread_id;
+  trg_opts->m_w2v_opts = src_opts->m_w2v_opts;
+  trg_opts->m_vocab = src_opts->m_vocab;
+  trg_opts->m_nnet = src_opts->m_nnet;
+  trg_opts->m_exp_table = src_opts->m_exp_table;
+  trg_opts->m_ugram_table = src_opts->m_ugram_table;
+}
+
 static void reset_nnet(nnet_t *a_nnet) {
   a_nnet->m_syn0 = NULL;
   a_nnet->m_syn1 = NULL;
@@ -434,19 +448,23 @@ void train_model(opt_t *a_opts) {
                                0, a_opts, &vocab, &nnet,
                                exp_table, ugram_table};
 
+  thread_opts_t *ptopts = (thread_opts_t *) malloc(a_opts->m_num_threads
+                                                   * sizeof(thread_opts_t));
   pthread_t *pt = (pthread_t *) malloc(a_opts->m_num_threads
                                        * sizeof(pthread_t));
   long a;
   for (a = 0; a < a_opts->m_num_threads; ++a) {
-    thread_opts.m_thread_id = a;
+    copy_thread_opts(&thread_opts, &ptopts[a], a);
     pthread_create(&pt[a], NULL, train_model_thread,
-                   (void *) &thread_opts);
+                   (void *) &ptopts[a]);
   }
   for (a = 0; a < a_opts->m_num_threads; a++)
     pthread_join(pt[a], NULL);
 
   save_embeddings(a_opts, &vocab, &nnet);
 
+  free(pt);
+  free(ptopts);
   free_nnet(&nnet);
   free(ugram_table);
   free(exp_table);

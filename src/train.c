@@ -158,9 +158,6 @@ static void *train_model_thread(void *a_opts) {
   real *neu1e = (real *)calloc(layer1_size, sizeof(real));
   FILE *fi = fopen(w2v_opts->m_train_file, "rb");
   fseek(fi, file_size / (long long) num_threads * (long long) next_random, SEEK_SET);
-  /* fprintf(stderr, "thread_id = %ld\n", thread_opts->m_thread_id); */
-  /* fprintf(stderr, "ftell = %ld\n", ftell(fi)); */
-  /* fprintf(stderr, "next_random = %lld\n", (long long) next_random); */
   while (1) {
     if (word_count - last_word_count > 10000) {
       word_count_actual += word_count - last_word_count;

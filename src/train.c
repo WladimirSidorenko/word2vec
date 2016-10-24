@@ -29,13 +29,14 @@ typedef struct {
   const opt_t *m_w2v_opts;
   const vocab_t *m_vocab;
   nnet_t *m_nnet;
-  real *m_exp_table;
-  int *m_ugram_table;
+  const real *m_exp_table;
+  const int *m_ugram_table;
 } thread_opts_t;
 
 ///////////////
 // Constants //
 ///////////////
+pthread_mutex_t tlock;
 
 /////////////
 // Methods //
@@ -157,6 +158,9 @@ static void *train_model_thread(void *a_opts) {
   real *neu1e = (real *)calloc(layer1_size, sizeof(real));
   FILE *fi = fopen(w2v_opts->m_train_file, "rb");
   fseek(fi, file_size / (long long) num_threads * (long long) next_random, SEEK_SET);
+  /* fprintf(stderr, "thread_id = %ld\n", thread_opts->m_thread_id); */
+  /* fprintf(stderr, "ftell = %ld\n", ftell(fi)); */
+  /* fprintf(stderr, "next_random = %lld\n", (long long) next_random); */
   while (1) {
     if (word_count - last_word_count > 10000) {
       word_count_actual += word_count - last_word_count;
@@ -254,6 +258,7 @@ static void *train_model_thread(void *a_opts) {
             f = 0;
             l2 = vocab[word].point[d] * layer1_size;
             // Propagate hidden -> output
+            pthread_mutex_lock(&tlock);
             for (c = 0; c < layer1_size; c++)
               f += neu1[c] * nnet->m_syn1[c + l2];
 
@@ -269,8 +274,10 @@ static void *train_model_thread(void *a_opts) {
               neu1e[c] += g * nnet->m_syn1[c + l2];
             }
             // Learn weights hidden -> output
-            for (c = 0; c < layer1_size; c++)
+            for (c = 0; c < layer1_size; c++) {
               nnet->m_syn1[c + l2] += g * neu1[c];
+            }
+            pthread_mutex_unlock(&tlock);
           }
         }
         // NEGATIVE SAMPLING
@@ -288,9 +295,9 @@ static void *train_model_thread(void *a_opts) {
             }
             l2 = target * layer1_size;
             f = 0;
+            pthread_mutex_lock(&tlock);
             for (c = 0; c < layer1_size; c++) {
               f += neu1[c] * nnet->m_syn1neg[c + l2];
-
             }
             if (f > MAX_EXP) {
               g = (label - 1) * w2v_opts->m_alpha;
@@ -307,6 +314,7 @@ static void *train_model_thread(void *a_opts) {
             for (c = 0; c < layer1_size; c++) {
               nnet->m_syn1neg[c + l2] += g * neu1[c];
             }
+            pthread_mutex_unlock(&tlock);
           }
         // hidden -> in
         for (a = b; a < window * 2 + 1 - b; a++) {
@@ -316,9 +324,11 @@ static void *train_model_thread(void *a_opts) {
             if (c >= sentence_length) continue;
             last_word = sen[c];
             if (last_word == -1) continue;
+            pthread_mutex_lock(&tlock);
             for (c = 0; c < layer1_size; c++) {
               nnet->m_syn0[c + last_word * layer1_size] += neu1e[c];
             }
+            pthread_mutex_unlock(&tlock);
           }
         }
       }
@@ -338,6 +348,7 @@ static void *train_model_thread(void *a_opts) {
               f = 0;
               l2 = vocab[word].point[d] * layer1_size;
               // Propagate hidden -> output
+              pthread_mutex_lock(&tlock);
               for (c = 0; c < layer1_size; c++) f += nnet->m_syn0[c + l1] * nnet->m_syn1[c + l2];
               if (f <= -MAX_EXP) continue;
               else if (f >= MAX_EXP) continue;
@@ -347,7 +358,10 @@ static void *train_model_thread(void *a_opts) {
               // Propagate errors output -> hidden
               for (c = 0; c < layer1_size; c++) neu1e[c] += g * nnet->m_syn1[c + l2];
               // Learn weights hidden -> output
-              for (c = 0; c < layer1_size; c++) nnet->m_syn1[c + l2] += g * nnet->m_syn0[c + l1];
+              for (c = 0; c < layer1_size; c++) {
+                nnet->m_syn1[c + l2] += g * nnet->m_syn0[c + l1];
+              }
+              pthread_mutex_unlock(&tlock);
             }
           // NEGATIVE SAMPLING
           if (w2v_opts->m_negative > 0)
@@ -364,6 +378,7 @@ static void *train_model_thread(void *a_opts) {
               }
               l2 = target * layer1_size;
               f = 0;
+              pthread_mutex_lock(&tlock);
               for (c = 0; c < layer1_size; c++)
                 f += nnet->m_syn0[c + l1] * nnet->m_syn1neg[c + l2];
 
@@ -379,11 +394,17 @@ static void *train_model_thread(void *a_opts) {
               for (c = 0; c < layer1_size; c++)
                 neu1e[c] += g * nnet->m_syn1neg[c + l2];
 
-              for (c = 0; c < layer1_size; c++)
+              for (c = 0; c < layer1_size; c++) {
                 nnet->m_syn1neg[c + l2] += g * nnet->m_syn0[c + l1];
+              }
+              pthread_mutex_unlock(&tlock);
             }
           // Learn weights input -> hidden
-          for (c = 0; c < layer1_size; c++) nnet->m_syn0[c + l1] += neu1e[c];
+          pthread_mutex_lock(&tlock);
+          for (c = 0; c < layer1_size; c++) {
+            nnet->m_syn0[c + l1] += neu1e[c];
+          }
+          pthread_mutex_unlock(&tlock);
         }
     }
     sentence_position++;
@@ -453,6 +474,11 @@ void train_model(opt_t *a_opts) {
   pthread_t *pt = (pthread_t *) malloc(a_opts->m_num_threads
                                        * sizeof(pthread_t));
   long a;
+  if (pthread_mutex_init(&tlock, NULL)) {
+    fprintf(stderr, "\nmutex init failed\n");
+    exit(5);
+  }
+
   for (a = 0; a < a_opts->m_num_threads; ++a) {
     copy_thread_opts(&thread_opts, &ptopts[a], a);
     pthread_create(&pt[a], NULL, train_model_thread,
@@ -462,6 +488,7 @@ void train_model(opt_t *a_opts) {
     pthread_join(pt[a], NULL);
 
   save_embeddings(a_opts, &vocab, &nnet);
+  pthread_mutex_destroy(&tlock);
 
   free(pt);
   free(ptopts);

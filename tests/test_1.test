@@ -16,5 +16,5 @@ if test $? -eq 0; then
     echo 'ok single_thread_original # single-threaded implementation returns original vectors'
 else
     echo 'not ok single_thread_original # single-threaded implementation does not' \
-    ' return original vectors'
+	' return original vectors'
 fi

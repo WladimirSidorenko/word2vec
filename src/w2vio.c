@@ -46,20 +46,10 @@ int ReadWordIndex(FILE *fin,
   return search_vocab(word, a_vocab, a_vocab_hash);
 }
 
-static int process_line_multitask(vocab_t *a_vocab, char *a_word,
-                                  const char *a_line, ssize_t a_read) {
-  int n_words = 0;
-  return n_words;
-}
-
-static int process_line_task_specific(vocab_t *a_vocab, char *a_word,
-                                      const char *a_line, ssize_t a_read) {
-  int n_words = 0;
-  return n_words;
-}
-
-static int process_line_w2v(vocab_t *a_vocab, char *a_word,
-                            const char *a_line, ssize_t a_read) {
+static int process_line_w2v(vocab_t *a_vocab,
+                            multiclass_t *a_multiclass,
+                            const int a_use_w2v,
+                            char *a_word, const char *a_line, ssize_t a_read) {
   int n_words = 0;
 
   ssize_t i, n_chars;
@@ -80,13 +70,41 @@ static int process_line_w2v(vocab_t *a_vocab, char *a_word,
   }
 
   if (n_chars > 0) {
+    a_word[n_chars] = 0;
     add_word2vocab(a_vocab, a_word);
     ++n_words;
   }
   return n_words;
 }
 
-size_t learn_vocab_from_trainfile(vocab_t *a_vocab, opt_t *a_opts) {
+static int process_tag_line(multiclass_t *a_multiclass, const char *a_line) {
+  return 0;
+}
+
+static int process_line_task_specific(vocab_t *a_vocab,
+                                      multiclass_t *a_multiclass,
+                                      const int a_use_w2v,
+                                      char *a_word,
+                                      const char *a_line, ssize_t a_read) {
+  int active_tasks = 0;
+  const char *tag_line = strchr(a_line, '\t');
+  if (tag_line == NULL) {
+    fprintf(stderr,
+            "Invalid line format (missing tags): '%s'\n", a_line);
+    exit(5);
+  } else if ((active_tasks = process_tag_line(a_multiclass, tag_line)) < 0) {
+    exit(6);
+  }
+
+  if (!active_tasks && !a_use_w2v)
+    return 0;
+
+  ssize_t line_read = (ssize_t)(tag_line - a_line);
+  return process_line_w2v(a_vocab, NULL, 0, a_word, a_line, line_read);
+}
+
+size_t learn_vocab_from_trainfile(vocab_t *a_vocab, multiclass_t *a_multiclass,
+                                  opt_t *a_opts) {
   FILE *fin = fopen(a_opts->m_train_file, "rb");
   if (fin == NULL) {
     fprintf(stderr, "ERROR: training data file not found!\n");
@@ -102,12 +120,12 @@ size_t learn_vocab_from_trainfile(vocab_t *a_vocab, opt_t *a_opts) {
   char *line = NULL;
   size_t len = 0;
   char word[MAX_STRING];
-  int (*process_line)(vocab_t *a_vocab, char *a_word,
+  const int use_w2v = a_opts->m_w2v || a_opts->m_least_sq;
+  int (*process_line)(vocab_t *a_vocab, multiclass_t *a_multiclass,
+                      const int a_use_w2v, char *a_word,
                       const char *a_line, ssize_t a_read) = NULL;
 
-  if (a_opts->m_multitask)
-    process_line = process_line_multitask;
-  else if (a_opts->m_task_specific)
+  if (a_opts->m_task_specific)
     process_line = process_line_task_specific;
   else
     process_line = process_line_w2v;
@@ -121,7 +139,8 @@ size_t learn_vocab_from_trainfile(vocab_t *a_vocab, opt_t *a_opts) {
       fprintf(stderr, "%lldK%c", train_words / 1000, 13);
       fflush(stderr);
     }
-    train_words += process_line(a_vocab, word, line, read);
+    train_words += process_line(a_vocab, a_multiclass, use_w2v,
+                                word, line, read);
 
     if (a_vocab->m_vocab_size > VOCAB_HASH_SIZE * 0.7)
       reduce_vocab(a_vocab, a_opts);

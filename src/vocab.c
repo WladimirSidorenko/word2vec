@@ -231,6 +231,18 @@ int sort_vocab(vocab_t *a_vocab, const int a_min_count) {
   return train_words;
 }
 
+void output_vocab(FILE *a_ostream, const vocab_t *a_vocab) {
+  long long i;
+  vw_t *iword;
+  fprintf(a_ostream, "vocab_size = %lld\n", a_vocab->m_vocab_size);
+  fprintf(a_ostream, "train_words = %lld\n", a_vocab->m_train_words);
+  for (i = 0; i < a_vocab->m_vocab_size; ++i) {
+    iword = &a_vocab->m_vocab[i];
+    fprintf(a_ostream, "vocab[%lld] = %s (cn = %lld, codelen = %c)\n",
+            i, iword->word, iword->cn, iword->codelen);
+  }
+}
+
 // Reduces the vocabulary by removing infrequent tokens
 void reduce_vocab(vocab_t *a_vocab, opt_t *a_opts) {
   long long vocab_size = a_vocab->m_vocab_size;

@@ -1,6 +1,7 @@
 //////////////
 // Includes //
 //////////////
+#include "common.h"
 #include "train.h"
 #include "vocab.h"
 #include "w2vio.h"
@@ -450,8 +451,10 @@ void train_model(opt_t *a_opts) {
   /* initialize vocabulary and exp table */
   vocab_t vocab;
   init_vocab(&vocab);
-  size_t file_size = learn_vocab_from_trainfile(&vocab, a_opts);
-
+  multiclass_t multiclass = {0, NULL};
+  size_t file_size = learn_vocab_from_trainfile(&vocab,
+                                                &multiclass,
+                                                a_opts);
   real *exp_table = init_exp_table();
 
   nnet_t nnet;

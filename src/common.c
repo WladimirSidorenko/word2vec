@@ -24,11 +24,11 @@ void reset_opt(opt_t *opt) {
   opt->m_least_sq = 0;
   opt->m_min_count = 5;
   opt->m_min_reduce = 1;
-  opt->m_multitask = 0;
   opt->m_negative = 5;
   opt->m_num_threads = 12;
   opt->m_task_specific = 0;
   opt->m_window = 5;
+  opt->m_w2v = 0;
 }
 
 opt_t *create_opt(void) {

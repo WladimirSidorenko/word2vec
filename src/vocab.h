@@ -8,6 +8,7 @@
 
 #include <stddef.h>                   /* NULL */
 #include <stdlib.h>                   /* malloc(), free() */
+#include <stdio.h>                    /* FILE * */
 
 ////////////
 // Macros //
@@ -44,16 +45,6 @@ typedef struct vocab {
 /////////////
 
 /**
- * Initialize a unigram table.
- *
- * @param a_vocab - vocabulary with relevant information
- * @type vw_t *
- *
- * @return \c int * - pointer to the initialized table
- */
-int *init_unigram_table(vocab_t *a_vocab);
-
-/**
  * Add a word to the vocabulary.
  *
  * @param a_vocab - vocabulary to add the word to
@@ -66,19 +57,14 @@ int *init_unigram_table(vocab_t *a_vocab);
 int add_word2vocab(vocab_t *a_vocab, const char *a_word);
 
 /**
- * Look up a word in the vocabulary.
+ * Free memory occupied by vocabulary.
  *
- * @param a_word - word to search for
- * @type char *
- * @param a_vocab - vocabulary to search in
- * @type vw_t *
- * @param a_vocab_hash - hash of word indices
- * @type int *
+ * @param a_vocab - vocabulary innstance
+ * @type vocab_t *
  *
- * @return \c int - position of a word in the vocabulary or -1 if the
- *   word is not found
+ * @return \c void
  */
-int search_vocab(const char *a_word, const vw_t *a_vocab, const int *a_vocab_hash);
+void free_vocab(vocab_t *a_vocab);
 
 /**
  * Create binary search tree for the vocabulary.
@@ -101,26 +87,26 @@ void create_binary_tree(vocab_t *a_vocab);
 void init_vocab(vocab_t *a_vocab);
 
 /**
- * Free memory occupied by vocabulary.
+ * Initialize a unigram table.
  *
- * @param a_vocab - vocabulary innstance
+ * @param a_vocab - vocabulary with relevant information
+ * @type vw_t *
+ *
+ * @return \c int * - pointer to the initialized table
+ */
+int *init_unigram_table(vocab_t *a_vocab);
+
+/**
+ * Output vocabulary to the specified stream.
+ *
+ * @param a_ostream - output stream
+ * @type FILE *
+ * @param a_vocab - vocabulary instance
  * @type vocab_t *
  *
  * @return \c void
  */
-void free_vocab(vocab_t *a_vocab);
-
-/**
- * Sort vocabulary.
- *
- * @param a_vocab - vocabulary to be sorted
- * @type vocab_t *
- * @param a_min_count - minimum required word frequency
- * @type const int
- *
- * @return \c int - number of words in the vocabulary
- */
-int sort_vocab(vocab_t *a_vocab, const int a_min_count);
+void output_vocab(FILE *a_ostream, const vocab_t *a_vocab);
 
 /**
  * Reduce vocabulary by removing infrequent tokens.
@@ -133,5 +119,32 @@ int sort_vocab(vocab_t *a_vocab, const int a_min_count);
  * @return \c void
  */
 void reduce_vocab(vocab_t *a_vocab, opt_t *a_opts);
+
+/**
+ * Look up a word in the vocabulary.
+ *
+ * @param a_word - word to search for
+ * @type char *
+ * @param a_vocab - vocabulary to search in
+ * @type vw_t *
+ * @param a_vocab_hash - hash of word indices
+ * @type int *
+ *
+ * @return \c int - position of a word in the vocabulary or -1 if the
+ *   word is not found
+ */
+int search_vocab(const char *a_word, const vw_t *a_vocab, const int *a_vocab_hash);
+
+/**
+ * Sort vocabulary.
+ *
+ * @param a_vocab - vocabulary to be sorted
+ * @type vocab_t *
+ * @param a_min_count - minimum required word frequency
+ * @type const int
+ *
+ * @return \c int - number of words in the vocabulary
+ */
+int sort_vocab(vocab_t *a_vocab, const int a_min_count);
 
 #endif  /* ifndef __WORD2VEC_VOCAB_H__ */

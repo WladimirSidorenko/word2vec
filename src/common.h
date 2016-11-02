@@ -21,6 +21,17 @@ typedef float real;                    // Precision of float numbers
 // Structs //
 /////////////
 
+/**
+ * Statistics about multiple task classes.
+ */
+typedef struct {
+  //< number of tasks in a multitask setting
+  size_t m_n_tasks;
+  //< maximum number of classes for each task
+  size_t *m_max_classes;
+} multiclass_t;
+
+
 struct opt {
   char m_train_file[MAX_STRING];
   char m_output_file[MAX_STRING];
@@ -38,11 +49,11 @@ struct opt {
   int m_least_sq;
   int m_min_count;
   int m_min_reduce;
-  int m_multitask;
   int m_negative;
   int m_num_threads;
   int m_task_specific;
   int m_window;
+  int m_w2v;
 };
 
 /////////////

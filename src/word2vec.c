@@ -64,14 +64,16 @@ static void usage(int a_ret) {
   printf("\tSave the resulting vectors in binary mode; default is 0 (off)\n");
   printf("-cbow <int>\n");
   printf("\tUse the continuous bag of words model; default is 1 (use 0 for skip-gram model)\n");
-  printf("-multitask <int>\n");
-  printf("\tTrain multi-task embeddings (argument should specify the number of additional tasks\n");
   printf("-task-specific <int>\n");
-  printf("\tTrain task-specific embeddings; argument should specify the number of classes;\n");
-  printf("\t(last field on each line of the input file should contain a numeric label `< int'\n");
-  printf("\tor `_' if the label is unknown and the instance should be skipped)\n");
+  printf("\tTrain task-specific embeddings if argument is > 0 (labels for each task\n"
+         "\tshould be consecutive integers starting from 0 specified as the last\n"
+         "\ttab-separated field on each line, or `_' if the label is unknown and\n"
+         "\tthe instance should be skipped);\n");
+  printf("-w2v <int>\n");
+  printf("\tAdd normal word2vec objective to the multi-task training\n");
   printf("-least-sq <int>\n");
-  printf("\tMap generic word2vec vectors to task-specific embeddings using least squares\n");
+  printf("\tMap generic word2vec vectors to the learned task-specific vectors using\n"
+      "\tthe method of least squares\n");
   printf("\nExamples:\n");
   printf("./word2vec -train data.txt -output vec.txt -size 200 -window 5 -sample 1e-4 -negative 5 -hs 0 -binary 0 -cbow 1 -iter 3\n\n");
   exit(a_ret);
@@ -116,10 +118,10 @@ int main(int argc, char **argv) {
       opt.m_iter = atoi(argv[++i]);
     } else if (strcmp(argv[i], "-min-count") == 0) {
       opt.m_min_count = atoi(argv[++i]);
-    } else if (strcmp(argv[i], "-multitask") == 0) {
-      opt.m_multitask = atoi(argv[++i]);
     } else if (strcmp(argv[i], "-task-specific") == 0) {
       opt.m_task_specific = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "-w2v") == 0) {
+      opt.m_w2v = atoi(argv[++i]);
     } else if (strcmp(argv[i], "-least-sq") == 0) {
       opt.m_least_sq = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--") == 0) {
@@ -153,15 +155,19 @@ int main(int argc, char **argv) {
     exit(3);
   }
 
-  if (opt.m_least_sq)
-    opt.m_task_specific = 1;
-
-  if (opt.m_multitask && opt.m_task_specific) {
+  if (opt.m_w2v && opt.m_least_sq) {
     fprintf(stderr,
-            "Options -multitask and -task-specific/-least-sq are mutually exclusive."
+            "Options -w2v and -least-sq are mutually exclusive."
             "  Type --help to see usage.\n");
     exit(4);
   }
+
+  if ((opt.m_least_sq || opt.m_w2v) && !opt.m_task_specific) {
+    fprintf(stderr,
+            "Mandatory option -task-specific <int> is not specified.\n");
+    exit(5);
+  }
+
   train_model(&opt);
   return 0;
 }

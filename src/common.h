@@ -10,6 +10,7 @@
 // Macros //
 ////////////
 # define MAX_STRING 100
+# define MAX_TASKS 1024
 
 //////////////
 // typedefs //
@@ -28,7 +29,7 @@ typedef struct {
   //< number of tasks in a multitask setting
   size_t m_n_tasks;
   //< maximum number of classes for each task
-  size_t *m_max_classes;
+  size_t m_max_classes[MAX_TASKS];
 } multiclass_t;
 
 

@@ -4,8 +4,10 @@
 #include "common.h"
 #include "w2vio.h"
 
+#include <errno.h>  /* errno */
 #include <ctype.h>  /* isspace() */
-#include <string.h>
+#include <stdio.h>  /* sscanf() */
+#include <string.h> /* strcpy() */
 
 /////////////
 // Methods //
@@ -77,8 +79,68 @@ static int process_line_w2v(vocab_t *a_vocab,
   return n_words;
 }
 
-static int process_tag_line(multiclass_t *a_multiclass, const char *a_line) {
-  return 0;
+static int process_tag_line(multiclass_t *a_multiclass, const char *a_line,
+                            ssize_t a_read) {
+  ssize_t i;
+  int tag_len = 0;
+  /* `m' counts actual tasks, `n' counts active tasks  */
+  size_t m = 0, label = 0;
+  int n = 0, seen_space = 0;
+  int first_run = (a_multiclass->m_n_tasks == 0);
+  for (i = 0; i < a_read; ++i) {
+    if (isspace(a_line[i])) {
+      seen_space = 1;
+      continue;
+    } else if (a_line[i] == '_') {
+      if (seen_space)
+        ++m;
+      else
+        continue;
+    } else {
+      errno = 0;
+      tag_len = sscanf(&a_line[i], "%zu", &label);
+      if (tag_len == 0) {
+        fprintf(stderr, "Invalid tag specification '%s'\n", &a_line[i]);
+        return -1;
+      } else if (tag_len == EOF) {
+        if (errno) {
+          perror("sscanf():");
+        } else {
+          fprintf(stderr, "EOF reached while looking for tag: '%s'\n",
+                  &a_line[i]);
+        }
+        return -1;
+      } else {
+        /* increment the label by one for comparison */
+        if ((++label) > a_multiclass->m_max_classes[m])
+          a_multiclass->m_max_classes[m] = label;
+
+        /* advance the pointer to the end of number */
+        i += (size_t) tag_len;
+        ++n;
+      }
+      ++m;
+    }
+    seen_space = 0;
+  }
+  if (first_run) {
+    if (m == 0) {
+      fprintf(stderr,
+              "Invalid line format "
+              "(no tags specified for task-specific embeddings):"
+              " '%s'\n", a_line);
+      return -1;
+    } else {
+      a_multiclass->m_n_tasks = m;
+    }
+  } else if (m != a_multiclass->m_n_tasks) {
+      fprintf(stderr,
+              "Invalid line format "
+              "(different number of tags specified for task-specific embeddings):"
+              " %zu versus %zu\n", m, a_multiclass->m_n_tasks);
+      return -1;
+  }
+  return n;
 }
 
 static int process_line_task_specific(vocab_t *a_vocab,
@@ -92,14 +154,16 @@ static int process_line_task_specific(vocab_t *a_vocab,
     fprintf(stderr,
             "Invalid line format (missing tags): '%s'\n", a_line);
     exit(5);
-  } else if ((active_tasks = process_tag_line(a_multiclass, tag_line)) < 0) {
-    exit(6);
   }
+  ssize_t line_read = (ssize_t)(tag_line - a_line);
+
+  if ((active_tasks = process_tag_line(a_multiclass,
+                                       tag_line, a_read - line_read)) < 0)
+    exit(6);
 
   if (!active_tasks && !a_use_w2v)
     return 0;
 
-  ssize_t line_read = (ssize_t)(tag_line - a_line);
   return process_line_w2v(a_vocab, NULL, 0, a_word, a_line, line_read);
 }
 

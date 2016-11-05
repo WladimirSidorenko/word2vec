@@ -451,7 +451,7 @@ void train_model(opt_t *a_opts) {
   /* initialize vocabulary and exp table */
   vocab_t vocab;
   init_vocab(&vocab);
-  multiclass_t multiclass = {0, NULL};
+  multiclass_t multiclass;
   size_t file_size = learn_vocab_from_trainfile(&vocab,
                                                 &multiclass,
                                                 a_opts);

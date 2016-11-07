@@ -53,6 +53,8 @@ static int process_line_w2v(vocab_t *a_vocab,
                             const int a_use_w2v,
                             char *a_word, const char *a_line, ssize_t a_read) {
   int n_words = 0;
+  UNUSED(a_multiclass);
+  UNUSED(a_use_w2v);
 
   ssize_t i, n_chars;
   for (i = 0, n_chars = 0; i < a_read; ++i, ++n_chars) {
@@ -184,12 +186,12 @@ size_t learn_vocab_from_trainfile(vocab_t *a_vocab, multiclass_t *a_multiclass,
   char *line = NULL;
   size_t len = 0;
   char word[MAX_STRING];
-  const int use_w2v = a_opts->m_w2v || a_opts->m_least_sq;
+  const int use_w2v = !a_opts->m_ts;
   int (*process_line)(vocab_t *a_vocab, multiclass_t *a_multiclass,
                       const int a_use_w2v, char *a_word,
                       const char *a_line, ssize_t a_read) = NULL;
 
-  if (a_opts->m_task_specific)
+  if (a_opts->m_ts || a_opts->m_ts_least_sq || a_opts->m_ts_w2v)
     process_line = process_line_task_specific;
   else
     process_line = process_line_w2v;

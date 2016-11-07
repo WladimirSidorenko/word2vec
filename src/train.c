@@ -16,9 +16,14 @@
 // Structs //
 /////////////
 typedef struct {
+  /* layers specific to the classical word2vec objective */
   real *m_syn0;
   real *m_syn1;
   real *m_syn1neg;
+
+  /* task-specific layers */
+  size_t m_n_tasks;
+  real **m_vec2task;
 } nnet_t;
 
 typedef struct {
@@ -60,12 +65,21 @@ static void reset_nnet(nnet_t *a_nnet) {
   a_nnet->m_syn0 = NULL;
   a_nnet->m_syn1 = NULL;
   a_nnet->m_syn1neg = NULL;
+
+  a_nnet->m_n_tasks = 0;
+  a_nnet->m_vec2task = NULL;
 }
 
 static void free_nnet(nnet_t *a_nnet) {
   free(a_nnet->m_syn0);
   free(a_nnet->m_syn1);
   free(a_nnet->m_syn1neg);
+
+  size_t i;
+  for (i = 0; i < a_nnet->m_n_tasks; ++i) {
+    free(a_nnet->m_vec2task[i]);
+  }
+  free(a_nnet->m_vec2task);
   reset_nnet(a_nnet);
 }
 
@@ -79,19 +93,40 @@ static real *init_exp_table(void) {
   return exp_table;
 }
 
-static void init_net(nnet_t *a_nnet, vocab_t *a_vocab, const opt_t *a_opts) {
+static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
+                         const opt_t *a_opts, const multiclass_t *a_multiclass) {
+  UNUSED(a_opts);
+  long long vocab_size = a_vocab->m_vocab_size;
+  a_nnet->m_n_tasks = a_multiclass->m_n_tasks;
+  /* allocate memory for task-specific weight matrices */
+  a_nnet->m_vec2task = calloc(a_nnet->m_n_tasks, sizeof(real *));
+  if (a_nnet->m_vec2task == NULL) {
+    fprintf(stderr, "Could not allocate memory for m_vec2task.\n");
+    exit(8);
+  }
+  int a;
+  size_t i;
+  for (i = 0; i < a_nnet->m_n_tasks; ++i) {
+    a = posix_memalign((void **) &a_nnet->m_vec2task[i], 128,
+                       (long long) vocab_size * a_multiclass->m_max_classes[i]
+                       * sizeof(real));
+    if (!a) {
+      fprintf(stderr, "Could not allocate memory for task-specific coefficients.\n");
+      exit(9);
+    }
+  }
+}
+
+static void init_w2v_nnet(nnet_t *a_nnet, const vocab_t *a_vocab, const opt_t *a_opts) {
   long long a, b;
   unsigned long long next_random = 1;
   long long vocab_size = a_vocab->m_vocab_size;
   long long layer1_size = a_opts->m_layer1_size;
-
-  reset_nnet(a_nnet);
-
   a = posix_memalign((void **) &a_nnet->m_syn0, 128,
                      (long long) vocab_size
                      * layer1_size * sizeof(real));
 
-  if (a_nnet->m_syn0 == NULL) {
+  if (!a) {
     fprintf(stderr, "Memory allocation failed\n");
     exit(1);
   }
@@ -99,7 +134,7 @@ static void init_net(nnet_t *a_nnet, vocab_t *a_vocab, const opt_t *a_opts) {
     a = posix_memalign((void **)&a_nnet->m_syn1, 128,
                        (long long) vocab_size
                        * layer1_size * sizeof(real));
-    if (a_nnet->m_syn1 == NULL) {
+    if (!a) {
       fprintf(stderr, "Memory allocation failed\n");
       exit(1);
     }
@@ -111,7 +146,7 @@ static void init_net(nnet_t *a_nnet, vocab_t *a_vocab, const opt_t *a_opts) {
     a = posix_memalign((void **)&a_nnet->m_syn1neg, 128,
                        (long long)vocab_size
                        * layer1_size * sizeof(real));
-    if (a_nnet->m_syn1neg == NULL) {
+    if (!a) {
       fprintf(stderr, "Memory allocation failed\n");
       exit(1);
     }
@@ -127,6 +162,16 @@ static void init_net(nnet_t *a_nnet, vocab_t *a_vocab, const opt_t *a_opts) {
                                               / (real)65536) - 0.5) / layer1_size;
     }
   }
+}
+
+static void init_nnet(nnet_t *a_nnet, vocab_t *a_vocab,
+                     const opt_t *a_opts, const multiclass_t *a_multiclass) {
+  reset_nnet(a_nnet);
+  if (a_opts->m_ts > 0 || a_opts->m_ts_w2v > 0 || a_opts->m_ts_least_sq > 0)
+    init_ts_nnet(a_nnet, a_vocab, a_opts, a_multiclass);
+
+  if (a_opts->m_ts <= 0)
+    init_w2v_nnet(a_nnet, a_vocab, a_opts);
 }
 
 static void *train_model_thread(void *a_opts) {
@@ -458,7 +503,7 @@ void train_model(opt_t *a_opts) {
   real *exp_table = init_exp_table();
 
   nnet_t nnet;
-  init_net(&nnet, &vocab, a_opts);
+  init_nnet(&nnet, &vocab, a_opts, &multiclass);
 
   int *ugram_table = NULL;
   if (a_opts->m_negative > 0)

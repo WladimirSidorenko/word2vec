@@ -21,14 +21,15 @@ void reset_opt(opt_t *opt) {
   opt->m_cbow = 1;
   opt->m_debug_mode = 2;
   opt->m_hs = 0;
-  opt->m_least_sq = 0;
   opt->m_min_count = 5;
   opt->m_min_reduce = 1;
   opt->m_negative = 5;
   opt->m_num_threads = 12;
-  opt->m_task_specific = 0;
   opt->m_window = 5;
-  opt->m_w2v = 0;
+
+  opt->m_ts = 0;
+  opt->m_ts_w2v = 0;
+  opt->m_ts_least_sq = 0;
 }
 
 opt_t *create_opt(void) {

@@ -1,5 +1,5 @@
-#ifndef __WORD2VEC_COMMON_H__
-# define __WORD2VEC_COMMON_H__
+#ifndef WORD2VEC_COMMON_H_
+# define WORD2VEC_COMMON_H_
 
 //////////////
 // Includes //
@@ -11,6 +11,7 @@
 ////////////
 # define MAX_STRING 100
 # define MAX_TASKS 1024
+# define UNUSED(x) (void)(x)
 
 //////////////
 // typedefs //
@@ -47,14 +48,20 @@ struct opt {
   int m_cbow;
   int m_debug_mode;
   int m_hs;
-  int m_least_sq;
   int m_min_count;
   int m_min_reduce;
   int m_negative;
   int m_num_threads;
-  int m_task_specific;
+  /*< train task-specific embeddings only */
+  int m_ts;
   int m_window;
-  int m_w2v;
+  /*< train task-specific embeddings along with the normal word2vec
+   *  objective */
+  int m_ts_w2v;
+  /*< train word2vec and task-specific embeddings, applying the
+   *  least-squares method in the end to map the former vectors to the
+   *  latter representation */
+  int m_ts_least_sq;
 };
 
 /////////////
@@ -65,4 +72,4 @@ void reset_opt(opt_t *opt);
 
 opt_t *create_opt(void);
 
-#endif  /* ifndef __WORD2VEC_COMMON_H__ */
+#endif  /* ifndef WORD2VEC_COMMON_H_ */

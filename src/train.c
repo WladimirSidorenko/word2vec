@@ -95,6 +95,8 @@ static real *init_exp_table(void) {
 
 static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
                          const opt_t *a_opts, const multiclass_t *a_multiclass) {
+  /* we will probably need opts later for allocating memory to the
+   * least squares */
   UNUSED(a_opts);
   long long vocab_size = a_vocab->m_vocab_size;
   a_nnet->m_n_tasks = a_multiclass->m_n_tasks;
@@ -110,7 +112,7 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
     a = posix_memalign((void **) &a_nnet->m_vec2task[i], 128,
                        (long long) vocab_size * a_multiclass->m_max_classes[i]
                        * sizeof(real));
-    if (!a) {
+    if (a) {
       fprintf(stderr, "Could not allocate memory for task-specific coefficients.\n");
       exit(9);
     }
@@ -126,7 +128,7 @@ static void init_w2v_nnet(nnet_t *a_nnet, const vocab_t *a_vocab, const opt_t *a
                      (long long) vocab_size
                      * layer1_size * sizeof(real));
 
-  if (!a) {
+  if (a) {
     fprintf(stderr, "Memory allocation failed\n");
     exit(1);
   }
@@ -134,7 +136,7 @@ static void init_w2v_nnet(nnet_t *a_nnet, const vocab_t *a_vocab, const opt_t *a
     a = posix_memalign((void **)&a_nnet->m_syn1, 128,
                        (long long) vocab_size
                        * layer1_size * sizeof(real));
-    if (!a) {
+    if (a) {
       fprintf(stderr, "Memory allocation failed\n");
       exit(1);
     }
@@ -146,7 +148,7 @@ static void init_w2v_nnet(nnet_t *a_nnet, const vocab_t *a_vocab, const opt_t *a
     a = posix_memalign((void **)&a_nnet->m_syn1neg, 128,
                        (long long)vocab_size
                        * layer1_size * sizeof(real));
-    if (!a) {
+    if (a) {
       fprintf(stderr, "Memory allocation failed\n");
       exit(1);
     }
@@ -174,31 +176,236 @@ static void init_nnet(nnet_t *a_nnet, vocab_t *a_vocab,
     init_w2v_nnet(a_nnet, a_vocab, a_opts);
 }
 
+static void train_w2v_layer(const opt_t *w2v_opts,
+                            const vw_t *vocab, const long long vocab_size,
+                            const real *exp_table, const int *table,
+                            const int window, const long long layer1_size,
+                            nnet_t *nnet, long long sen[], long long word,
+                            real *neu1, real *neu1e,
+                            long long sentence_length,
+                            long long sentence_position,
+                            unsigned long long *next_random) {
+  real f, g;
+  long long a, b, c, cw, d, last_word, label, l1, l2, target;
+
+  for (c = 0; c < layer1_size; c++)
+    neu1[c] = 0;
+
+  for (c = 0; c < layer1_size; c++)
+    neu1e[c] = 0;
+
+  *next_random = (*next_random) * (unsigned long long)25214903917 + 11;
+  b = (*next_random) % window;
+  if (w2v_opts->m_cbow) {  //train the cbow architecture
+    // in -> hidden
+    cw = 0;
+    for (a = b; a < window * 2 + 1 - b; ++a)
+      if (a != window) {
+        c = sentence_position - window + a;
+        if (c < 0)
+          continue;
+
+        if (c >= sentence_length)
+          continue;
+
+        last_word = sen[c];
+        if (last_word == -1)
+          continue;
+
+        for (c = 0; c < layer1_size; c++) {
+          neu1[c] += nnet->m_syn0[c + last_word * layer1_size];
+        }
+        ++cw;
+      }
+    if (cw) {
+      for (c = 0; c < layer1_size; c++)
+        neu1[c] /= cw;
+
+      if (w2v_opts->m_hs) {
+        for (d = 0; d < vocab[word].codelen; d++) {
+          f = 0;
+          l2 = vocab[word].point[d] * layer1_size;
+          // Propagate hidden -> output
+          pthread_mutex_lock(&tlock);
+          for (c = 0; c < layer1_size; c++)
+            f += neu1[c] * nnet->m_syn1[c + l2];
+
+          if (f <= -MAX_EXP || f >= MAX_EXP)
+            continue;
+          else
+            f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+
+          // 'g' is the gradient multiplied by the learning rate
+          g = (1 - vocab[word].code[d] - f) * w2v_opts->m_alpha;
+          // Propagate errors output -> hidden
+          for (c = 0; c < layer1_size; c++) {
+            neu1e[c] += g * nnet->m_syn1[c + l2];
+          }
+          // Learn weights hidden -> output
+          for (c = 0; c < layer1_size; c++) {
+            nnet->m_syn1[c + l2] += g * neu1[c];
+          }
+          pthread_mutex_unlock(&tlock);
+        }
+      }
+      // NEGATIVE SAMPLING
+      if (w2v_opts->m_negative > 0)
+        for (d = 0; d < w2v_opts->m_negative + 1; ++d) {
+          if (d == 0) {
+            target = word;
+            label = 1;
+          } else {
+            *next_random = (*next_random) * (unsigned long long)25214903917 + 11;
+            target = table[((*next_random) >> 16) % TABLE_SIZE];
+            if (target == 0) target = (*next_random) % (vocab_size - 1) + 1;
+            if (target == word) continue;
+            label = 0;
+          }
+          l2 = target * layer1_size;
+          f = 0;
+          pthread_mutex_lock(&tlock);
+          for (c = 0; c < layer1_size; c++) {
+            f += neu1[c] * nnet->m_syn1neg[c + l2];
+          }
+          if (f > MAX_EXP) {
+            g = (label - 1) * w2v_opts->m_alpha;
+          } else if (f < -MAX_EXP) {
+            g = (label - 0) * w2v_opts->m_alpha;
+          } else {
+            g = (label - exp_table[(int)((f + MAX_EXP)
+                                         * (EXP_TABLE_SIZE / MAX_EXP / 2))])
+                * w2v_opts->m_alpha;
+          }
+          for (c = 0; c < layer1_size; c++) {
+            neu1e[c] += g * nnet->m_syn1neg[c + l2];
+          }
+          for (c = 0; c < layer1_size; c++) {
+            nnet->m_syn1neg[c + l2] += g * neu1[c];
+          }
+          pthread_mutex_unlock(&tlock);
+        }
+      // hidden -> in
+      for (a = b; a < window * 2 + 1 - b; a++) {
+        if (a != window) {
+          c = sentence_position - window + a;
+          if (c < 0)
+            continue;
+
+          if (c >= sentence_length)
+            continue;
+
+          last_word = sen[c];
+          if (last_word == -1)
+            continue;
+
+          pthread_mutex_lock(&tlock);
+          for (c = 0; c < layer1_size; c++) {
+            nnet->m_syn0[c + last_word * layer1_size] += neu1e[c];
+          }
+          pthread_mutex_unlock(&tlock);
+        }
+      }
+    }
+  } else {  //train skip-gram
+    for (a = b; a < window * 2 + 1 - b; a++)
+      if (a != window) {
+        c = sentence_position - window + a;
+        if (c < 0) continue;
+        if (c >= sentence_length) continue;
+        last_word = sen[c];
+        if (last_word == -1) continue;
+        l1 = last_word * layer1_size;
+        for (c = 0; c < layer1_size; c++)
+          neu1e[c] = 0;
+        // HIERARCHICAL SOFTMAX
+        if (w2v_opts->m_hs) for (d = 0; d < vocab[word].codelen; d++) {
+            f = 0;
+            l2 = vocab[word].point[d] * layer1_size;
+            // Propagate hidden -> output
+            pthread_mutex_lock(&tlock);
+            for (c = 0; c < layer1_size; c++) f += nnet->m_syn0[c + l1] * nnet->m_syn1[c + l2];
+            if (f <= -MAX_EXP) continue;
+            else if (f >= MAX_EXP) continue;
+            else f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+            // 'g' is the gradient multiplied by the learning rate
+            g = (1 - vocab[word].code[d] - f) * w2v_opts->m_alpha;
+            // Propagate errors output -> hidden
+            for (c = 0; c < layer1_size; c++) neu1e[c] += g * nnet->m_syn1[c + l2];
+            // Learn weights hidden -> output
+            for (c = 0; c < layer1_size; c++) {
+              nnet->m_syn1[c + l2] += g * nnet->m_syn0[c + l1];
+            }
+            pthread_mutex_unlock(&tlock);
+          }
+        // NEGATIVE SAMPLING
+        if (w2v_opts->m_negative > 0)
+          for (d = 0; d < w2v_opts->m_negative + 1; ++d) {
+            if (d == 0) {
+              target = word;
+              label = 1;
+            } else {
+              (*next_random) = (*next_random) * (unsigned long long)25214903917 + 11;
+              target = table[(*next_random >> 16) % TABLE_SIZE];
+              if (target == 0) target = (*next_random) % (vocab_size - 1) + 1;
+              if (target == word) continue;
+              label = 0;
+            }
+            l2 = target * layer1_size;
+            f = 0;
+            pthread_mutex_lock(&tlock);
+            for (c = 0; c < layer1_size; c++)
+              f += nnet->m_syn0[c + l1] * nnet->m_syn1neg[c + l2];
+
+            if (f > MAX_EXP)
+              g = (label - 1) * w2v_opts->m_alpha;
+            else if (f < -MAX_EXP)
+              g = (label - 0) * w2v_opts->m_alpha;
+            else
+              g = (label - exp_table[(int)((f + MAX_EXP)
+                                           * (EXP_TABLE_SIZE / MAX_EXP / 2))])
+                  * w2v_opts->m_alpha;
+
+            for (c = 0; c < layer1_size; c++)
+              neu1e[c] += g * nnet->m_syn1neg[c + l2];
+
+            for (c = 0; c < layer1_size; c++) {
+              nnet->m_syn1neg[c + l2] += g * nnet->m_syn0[c + l1];
+            }
+            pthread_mutex_unlock(&tlock);
+          }
+        // Learn weights input -> hidden
+        pthread_mutex_lock(&tlock);
+        for (c = 0; c < layer1_size; c++) {
+          nnet->m_syn0[c + l1] += neu1e[c];
+        }
+        pthread_mutex_unlock(&tlock);
+      }
+  }
+}
+
 static void *train_model_thread(void *a_opts) {
   thread_opts_t *thread_opts = (thread_opts_t *) a_opts;
-  long long file_size = thread_opts->m_file_size;
+  const long long file_size = thread_opts->m_file_size;
   nnet_t *nnet = thread_opts->m_nnet;
   const real *exp_table = thread_opts->m_exp_table;
   const int *table = thread_opts->m_ugram_table;
   const vw_t *vocab = thread_opts->m_vocab->m_vocab;
   const int *vocab_hash = thread_opts->m_vocab->m_vocab_hash;
-  long long vocab_size = thread_opts->m_vocab->m_vocab_size;
-  long long train_words = thread_opts->m_vocab->m_train_words;
+  const long long vocab_size = thread_opts->m_vocab->m_vocab_size;
+  const long long train_words = thread_opts->m_vocab->m_train_words;
 
   const opt_t *w2v_opts = thread_opts->m_w2v_opts;
-  long long thread_id = (long long) thread_opts->m_thread_id;
-  long long layer1_size = w2v_opts->m_layer1_size;
-  long long num_threads = w2v_opts->m_num_threads;
-  real sample = w2v_opts->m_sample;
-  const int window = w2v_opts->m_window;
+  const long long thread_id = (long long) thread_opts->m_thread_id;
+  const int window = w2v_opts->m_window;;
+  const long long layer1_size = w2v_opts->m_layer1_size;
+  const long long num_threads = w2v_opts->m_num_threads;
+  const real sample = w2v_opts->m_sample;
 
-  long long a, b, d, cw, word, last_word, sentence_length = 0, sentence_position = 0;
+  long long word, sentence_length = 0, sentence_position = 0;
   long long word_count_actual = 0;
   long long word_count = 0, last_word_count = 0, sen[MAX_SENTENCE_LENGTH + 1];
-  long long l1, l2, c, target, label;
   long long local_iter = w2v_opts->m_iter;
   unsigned long long next_random = thread_id;
-  real f, g;
   clock_t now;
   real *neu1 = (real *)calloc(layer1_size, sizeof(real));
   real *neu1e = (real *)calloc(layer1_size, sizeof(real));
@@ -227,32 +434,39 @@ static void *train_model_thread(void *a_opts) {
 
     if (sentence_length == 0) {
       while (1) {
-        word = ReadWordIndex(fi, vocab, vocab_hash);
+        word = read_word_index(fi, vocab, vocab_hash);
         if (feof(fi))
           break;
 
         if (word == -1)
           continue;
+
         ++word_count;
-        if (word == 0) break;
+        if (word == 0)
+          break;
+
         // The subsampling randomly discards frequent words while keeping the ranking same
         if (sample > 0) {
           real ran = (sqrt(vocab[word].cn /
                            (sample * train_words)) + 1)
                      * (sample * train_words) / vocab[word].cn;
-          next_random = next_random * (unsigned long long)25214903917 + 11;
-          if (ran < (next_random & 0xFFFF) / (real)65536) continue;
+          next_random = next_random * (unsigned long long) 25214903917 + 11;
+          if (ran < (next_random & 0xFFFF) / (real) 65536)
+            continue;
         }
         sen[sentence_length] = word;
         ++sentence_length;
-        if (sentence_length >= MAX_SENTENCE_LENGTH) break;
+        if (sentence_length >= MAX_SENTENCE_LENGTH)
+          break;
       }
       sentence_position = 0;
     }
     if (feof(fi) || (word_count > train_words / num_threads)) {
       word_count_actual += word_count - last_word_count;
-      local_iter--;
-      if (local_iter == 0) break;
+      --local_iter;
+      if (local_iter == 0)
+        break;
+
       word_count = 0;
       last_word_count = 0;
       sentence_length = 0;
@@ -263,194 +477,13 @@ static void *train_model_thread(void *a_opts) {
     if (word == -1)
       continue;
 
-    for (c = 0; c < layer1_size; c++)
-      neu1[c] = 0;
+    train_w2v_layer(w2v_opts, vocab, vocab_size,
+                    exp_table, table, window,
+                    layer1_size, nnet, sen, word,
+                    neu1, neu1e, sentence_length,
+                    sentence_position, &next_random);
 
-    for (c = 0; c < layer1_size; c++)
-      neu1e[c] = 0;
-
-    next_random = next_random * (unsigned long long)25214903917 + 11;
-    b = next_random % window;
-    if (w2v_opts->m_cbow) {  //train the cbow architecture
-      // in -> hidden
-      cw = 0;
-      for (a = b; a < window * 2 + 1 - b; a++)
-        if (a != window) {
-          c = sentence_position - window + a;
-          if (c < 0)
-            continue;
-
-          if (c >= sentence_length)
-            continue;
-
-          last_word = sen[c];
-          if (last_word == -1)
-            continue;
-
-          for (c = 0; c < layer1_size; c++) {
-            neu1[c] += nnet->m_syn0[c + last_word * layer1_size];
-          }
-          ++cw;
-        }
-      if (cw) {
-        for (c = 0; c < layer1_size; c++)
-          neu1[c] /= cw;
-
-        if (w2v_opts->m_hs) {
-          for (d = 0; d < vocab[word].codelen; d++) {
-            f = 0;
-            l2 = vocab[word].point[d] * layer1_size;
-            // Propagate hidden -> output
-            pthread_mutex_lock(&tlock);
-            for (c = 0; c < layer1_size; c++)
-              f += neu1[c] * nnet->m_syn1[c + l2];
-
-            if (f <= -MAX_EXP || f >= MAX_EXP)
-              continue;
-            else
-              f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
-
-            // 'g' is the gradient multiplied by the learning rate
-            g = (1 - vocab[word].code[d] - f) * w2v_opts->m_alpha;
-            // Propagate errors output -> hidden
-            for (c = 0; c < layer1_size; c++) {
-              neu1e[c] += g * nnet->m_syn1[c + l2];
-            }
-            // Learn weights hidden -> output
-            for (c = 0; c < layer1_size; c++) {
-              nnet->m_syn1[c + l2] += g * neu1[c];
-            }
-            pthread_mutex_unlock(&tlock);
-          }
-        }
-        // NEGATIVE SAMPLING
-        if (w2v_opts->m_negative > 0)
-          for (d = 0; d < w2v_opts->m_negative + 1; ++d) {
-            if (d == 0) {
-              target = word;
-              label = 1;
-            } else {
-              next_random = next_random * (unsigned long long)25214903917 + 11;
-              target = table[(next_random >> 16) % TABLE_SIZE];
-              if (target == 0) target = next_random % (vocab_size - 1) + 1;
-              if (target == word) continue;
-              label = 0;
-            }
-            l2 = target * layer1_size;
-            f = 0;
-            pthread_mutex_lock(&tlock);
-            for (c = 0; c < layer1_size; c++) {
-              f += neu1[c] * nnet->m_syn1neg[c + l2];
-            }
-            if (f > MAX_EXP) {
-              g = (label - 1) * w2v_opts->m_alpha;
-            } else if (f < -MAX_EXP) {
-              g = (label - 0) * w2v_opts->m_alpha;
-            } else {
-              g = (label - exp_table[(int)((f + MAX_EXP)
-                                           * (EXP_TABLE_SIZE / MAX_EXP / 2))])
-                                           * w2v_opts->m_alpha;
-            }
-            for (c = 0; c < layer1_size; c++) {
-              neu1e[c] += g * nnet->m_syn1neg[c + l2];
-            }
-            for (c = 0; c < layer1_size; c++) {
-              nnet->m_syn1neg[c + l2] += g * neu1[c];
-            }
-            pthread_mutex_unlock(&tlock);
-          }
-        // hidden -> in
-        for (a = b; a < window * 2 + 1 - b; a++) {
-          if (a != window) {
-            c = sentence_position - window + a;
-            if (c < 0) continue;
-            if (c >= sentence_length) continue;
-            last_word = sen[c];
-            if (last_word == -1) continue;
-            pthread_mutex_lock(&tlock);
-            for (c = 0; c < layer1_size; c++) {
-              nnet->m_syn0[c + last_word * layer1_size] += neu1e[c];
-            }
-            pthread_mutex_unlock(&tlock);
-          }
-        }
-      }
-    } else {  //train skip-gram
-      for (a = b; a < window * 2 + 1 - b; a++)
-        if (a != window) {
-          c = sentence_position - window + a;
-          if (c < 0) continue;
-          if (c >= sentence_length) continue;
-          last_word = sen[c];
-          if (last_word == -1) continue;
-          l1 = last_word * layer1_size;
-          for (c = 0; c < layer1_size; c++)
-            neu1e[c] = 0;
-          // HIERARCHICAL SOFTMAX
-          if (w2v_opts->m_hs) for (d = 0; d < vocab[word].codelen; d++) {
-              f = 0;
-              l2 = vocab[word].point[d] * layer1_size;
-              // Propagate hidden -> output
-              pthread_mutex_lock(&tlock);
-              for (c = 0; c < layer1_size; c++) f += nnet->m_syn0[c + l1] * nnet->m_syn1[c + l2];
-              if (f <= -MAX_EXP) continue;
-              else if (f >= MAX_EXP) continue;
-              else f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
-              // 'g' is the gradient multiplied by the learning rate
-              g = (1 - vocab[word].code[d] - f) * w2v_opts->m_alpha;
-              // Propagate errors output -> hidden
-              for (c = 0; c < layer1_size; c++) neu1e[c] += g * nnet->m_syn1[c + l2];
-              // Learn weights hidden -> output
-              for (c = 0; c < layer1_size; c++) {
-                nnet->m_syn1[c + l2] += g * nnet->m_syn0[c + l1];
-              }
-              pthread_mutex_unlock(&tlock);
-            }
-          // NEGATIVE SAMPLING
-          if (w2v_opts->m_negative > 0)
-            for (d = 0; d < w2v_opts->m_negative + 1; ++d) {
-              if (d == 0) {
-                target = word;
-                label = 1;
-              } else {
-                next_random = next_random * (unsigned long long)25214903917 + 11;
-                target = table[(next_random >> 16) % TABLE_SIZE];
-                if (target == 0) target = next_random % (vocab_size - 1) + 1;
-                if (target == word) continue;
-                label = 0;
-              }
-              l2 = target * layer1_size;
-              f = 0;
-              pthread_mutex_lock(&tlock);
-              for (c = 0; c < layer1_size; c++)
-                f += nnet->m_syn0[c + l1] * nnet->m_syn1neg[c + l2];
-
-              if (f > MAX_EXP)
-                g = (label - 1) * w2v_opts->m_alpha;
-              else if (f < -MAX_EXP)
-                g = (label - 0) * w2v_opts->m_alpha;
-              else
-                g = (label - exp_table[(int)((f + MAX_EXP)
-                                            * (EXP_TABLE_SIZE / MAX_EXP / 2))])
-                                            * w2v_opts->m_alpha;
-
-              for (c = 0; c < layer1_size; c++)
-                neu1e[c] += g * nnet->m_syn1neg[c + l2];
-
-              for (c = 0; c < layer1_size; c++) {
-                nnet->m_syn1neg[c + l2] += g * nnet->m_syn0[c + l1];
-              }
-              pthread_mutex_unlock(&tlock);
-            }
-          // Learn weights input -> hidden
-          pthread_mutex_lock(&tlock);
-          for (c = 0; c < layer1_size; c++) {
-            nnet->m_syn0[c + l1] += neu1e[c];
-          }
-          pthread_mutex_unlock(&tlock);
-        }
-    }
-    sentence_position++;
+    ++sentence_position;
     if (sentence_position >= sentence_length) {
       sentence_length = 0;
       continue;

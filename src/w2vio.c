@@ -14,7 +14,7 @@
 /////////////
 
 // Reads a single word from a file, assuming space + tab + EOL to be word boundaries
-void ReadWord(char *word, FILE *fin) {
+void read_word(char *word, FILE *fin) {
   int a = 0, ch;
   while (!feof(fin)) {
     ch = fgetc(fin);
@@ -27,7 +27,9 @@ void ReadWord(char *word, FILE *fin) {
       if (ch == '\n') {
         strcpy(word, (char *)"</s>");
         return;
-      } else continue;
+      } else {
+        continue;
+      }
     }
     word[a] = ch;
     ++a;
@@ -38,10 +40,10 @@ void ReadWord(char *word, FILE *fin) {
 }
 
 // Reads a word and returns its index in the vocabulary
-int ReadWordIndex(FILE *fin,
-                  const vw_t *a_vocab, const int *a_vocab_hash) {
+int read_word_index(FILE *fin, const vw_t *a_vocab,
+                    const int *a_vocab_hash) {
   char word[MAX_STRING];
-  ReadWord(word, fin);
+  read_word(word, fin);
   if (feof(fin))
     return -1;
 

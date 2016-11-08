@@ -23,7 +23,7 @@
  *
  * @return \c void
  */
-void ReadWord(char *word, FILE *fin);
+void read_word(char *word, FILE *fin);
 
 /**
  * Read a word and return its index in the vocabulary.
@@ -37,7 +37,7 @@ void ReadWord(char *word, FILE *fin);
  *
  * @return \c void
  */
-int ReadWordIndex(FILE *fin, const vw_t *a_vocab, const int *a_vocab_hash);
+int read_word_index(FILE *fin, const vw_t *a_vocab, const int *a_vocab_hash);
 
 /**
  * Create vocabulary from words in the training file.

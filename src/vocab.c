@@ -58,7 +58,7 @@ void create_binary_tree(vocab_t *a_vocab) {
   long long *binary = (long long *) calloc(vocab_size * 2 + 1, sizeof(long long));
   long long *parent_node = (long long *) calloc(vocab_size * 2 + 1, sizeof(long long));
 
-  for (a = 0; a < vocab_size; a++)
+  for (a = 0; a < vocab_size; ++a)
     count[a] = vocab[a].cn;
 
   for (a = vocab_size; a < vocab_size * 2; a++)
@@ -221,8 +221,9 @@ int sort_vocab(vocab_t *a_vocab, const int a_min_count) {
       train_words += vocab[a].cn;
     }
   }
-  vocab = (struct vocab_word *) realloc(vocab, (vocab_size + 1)
-                                        * sizeof(struct vocab_word));
+  a_vocab->m_vocab = (struct vocab_word *) realloc(vocab,
+                                                   (vocab_size + 1) * sizeof(vw_t));
+  vocab = a_vocab->m_vocab;
   // Allocate memory for the binary tree construction
   for (a = 0; a < vocab_size; ++a) {
     vocab[a].code = (char *) calloc(MAX_CODE_LENGTH, sizeof(char));
@@ -285,6 +286,15 @@ void init_vocab(vocab_t *a_vocab) {
 }
 
 void free_vocab(vocab_t *a_vocab) {
+  vw_t *word;
+  long long i;
+  for (i = 0; i < a_vocab->m_vocab_size; ++i) {
+    word = &a_vocab->m_vocab[i];
+    free(word->code);
+    free(word->point);
+    free(word->word);
+  }
+
   free(a_vocab->m_vocab);
   free(a_vocab->m_vocab_hash);
   a_vocab->m_train_words = 0;

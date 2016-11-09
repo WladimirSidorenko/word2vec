@@ -20,24 +20,42 @@
  * @type char *
  * @param fin - input stream
  * @type FILE *
+ * @param a_consume_tab - digest tab as a normal white-space character
+ * @type const int
  *
  * @return \c void
  */
-void read_word(char *word, FILE *fin);
+void read_word(char *a_word, FILE *a_fin, const int a_consume_tab);
 
 /**
  * Read a word and return its index in the vocabulary.
  *
- * @param fin - input stream
+ * @param a_fin - input stream
  * @type FILE *
  * @param a_vocab - vocabulary to search in
  * @type vw_t *
  * @param a_vocab_hash - hash of word indices
  * @type int *
+ * @param a_consume_tab - digest tab as a normal white-space character
+ * @type const int
  *
  * @return \c void
  */
-int read_word_index(FILE *fin, const vw_t *a_vocab, const int *a_vocab_hash);
+int read_word_index(FILE *a_fin, const vw_t *a_vocab, const int *a_vocab_hash,
+                    const int a_consume_tab);
+
+/**
+ * Read a word and return its index in the vocabulary.
+ *
+ * @param a_fin - input stream
+ * @type FILE *
+ * @param a_multiclass - statistics on task-specific classes
+ * @type multiclass_t *
+ *
+ * @return negative \c int on error, otherwise a non-negative number
+ *   of active tasks
+ */
+int read_tags(FILE *a_fin, multiclass_t *a_multiclass);
 
 /**
  * Create vocabulary from words in the training file.

@@ -8,7 +8,7 @@ OUTPUT='vec.1.1.out'
 EXPECTED='vec.1.1.expected'
 
 ##################################################################
-# Test
+# Test 0
 echo $BINDIR >&2
 ${BIN} -train "${INPUT}" -output "${OUTPUT}" -threads 1
 diff -q "${OUTPUT}" "${EXPECTED}" > /dev/null

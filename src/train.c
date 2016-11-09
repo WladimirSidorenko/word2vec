@@ -37,6 +37,7 @@ typedef struct {
   nnet_t *m_nnet;
   const real *m_exp_table;
   const int *m_ugram_table;
+  const multiclass_t *m_multiclass;
 } thread_opts_t;
 
 ///////////////
@@ -61,9 +62,20 @@ static void copy_thread_opts(const thread_opts_t *src_opts,
   trg_opts->m_ugram_table = src_opts->m_ugram_table;
 }
 
+static void reset_multiclass(multiclass_t *a_multiclass) {
+  a_multiclass->m_n_tasks = 0;
+
+  size_t i;
+  for (i = 0; i < MAX_TASKS; ++i)
+    a_multiclass->m_max_classes[i] = -1;
+}
+
 static void reset_nnet(nnet_t *a_nnet) {
+  /*@null@*/
   a_nnet->m_syn0 = NULL;
+  /*@null@*/
   a_nnet->m_syn1 = NULL;
+  /*@null@*/
   a_nnet->m_syn1neg = NULL;
 
   a_nnet->m_n_tasks = 0;
@@ -140,8 +152,8 @@ static void init_w2v_nnet(nnet_t *a_nnet, const vocab_t *a_vocab, const opt_t *a
       fprintf(stderr, "Memory allocation failed\n");
       exit(1);
     }
-    for (a = 0; a < vocab_size; a++)
-      for (b = 0; b < layer1_size; b++)
+    for (a = 0; a < vocab_size; ++a)
+      for (b = 0; b < layer1_size; ++b)
         a_nnet->m_syn1[a * layer1_size + b] = 0;
   }
   if (a_opts->m_negative > 0) {
@@ -152,13 +164,13 @@ static void init_w2v_nnet(nnet_t *a_nnet, const vocab_t *a_vocab, const opt_t *a
       fprintf(stderr, "Memory allocation failed\n");
       exit(1);
     }
-    for (a = 0; a < vocab_size; a++)
-      for (b = 0; b < layer1_size; b++)
+    for (a = 0; a < vocab_size; ++a)
+      for (b = 0; b < layer1_size; ++b)
         a_nnet->m_syn1neg[a * layer1_size + b] = 0;
   }
 
-  for (a = 0; a < vocab_size; a++) {
-    for (b = 0; b < layer1_size; b++) {
+  for (a = 0; a < vocab_size; ++a) {
+    for (b = 0; b < layer1_size; ++b) {
       next_random = next_random * (unsigned long long)25214903917 + 11;
       a_nnet->m_syn0[a * layer1_size + b] = (((next_random & 0xFFFF)
                                               / (real)65536) - 0.5) / layer1_size;
@@ -176,22 +188,22 @@ static void init_nnet(nnet_t *a_nnet, vocab_t *a_vocab,
     init_w2v_nnet(a_nnet, a_vocab, a_opts);
 }
 
-static void train_w2v_layer(const opt_t *w2v_opts,
-                            const vw_t *vocab, const long long vocab_size,
-                            const real *exp_table, const int *table,
-                            const int window, const long long layer1_size,
-                            nnet_t *nnet, long long sen[], long long word,
-                            real *neu1, real *neu1e,
-                            long long sentence_length,
-                            long long sentence_position,
-                            unsigned long long *next_random) {
+static void train_w2v(const opt_t *w2v_opts,
+                      const vw_t *vocab, const long long vocab_size,
+                      const real *exp_table, const int *table,
+                      const int window, const long long layer1_size,
+                      nnet_t *nnet, long long sen[], long long word,
+                      real *neu1, real *neu1e,
+                      long long sentence_length,
+                      long long sentence_position,
+                      unsigned long long *next_random) {
   real f, g;
   long long a, b, c, cw, d, last_word, label, l1, l2, target;
 
-  for (c = 0; c < layer1_size; c++)
+  for (c = 0; c < layer1_size; ++c)
     neu1[c] = 0;
 
-  for (c = 0; c < layer1_size; c++)
+  for (c = 0; c < layer1_size; ++c)
     neu1e[c] = 0;
 
   *next_random = (*next_random) * (unsigned long long)25214903917 + 11;
@@ -212,22 +224,22 @@ static void train_w2v_layer(const opt_t *w2v_opts,
         if (last_word == -1)
           continue;
 
-        for (c = 0; c < layer1_size; c++) {
+        for (c = 0; c < layer1_size; ++c) {
           neu1[c] += nnet->m_syn0[c + last_word * layer1_size];
         }
         ++cw;
       }
     if (cw) {
-      for (c = 0; c < layer1_size; c++)
+      for (c = 0; c < layer1_size; ++c)
         neu1[c] /= cw;
 
       if (w2v_opts->m_hs) {
-        for (d = 0; d < vocab[word].codelen; d++) {
+        for (d = 0; d < vocab[word].codelen; ++d) {
           f = 0;
           l2 = vocab[word].point[d] * layer1_size;
           // Propagate hidden -> output
           pthread_mutex_lock(&tlock);
-          for (c = 0; c < layer1_size; c++)
+          for (c = 0; c < layer1_size; ++c)
             f += neu1[c] * nnet->m_syn1[c + l2];
 
           if (f <= -MAX_EXP || f >= MAX_EXP)
@@ -238,11 +250,11 @@ static void train_w2v_layer(const opt_t *w2v_opts,
           // 'g' is the gradient multiplied by the learning rate
           g = (1 - vocab[word].code[d] - f) * w2v_opts->m_alpha;
           // Propagate errors output -> hidden
-          for (c = 0; c < layer1_size; c++) {
+          for (c = 0; c < layer1_size; ++c) {
             neu1e[c] += g * nnet->m_syn1[c + l2];
           }
           // Learn weights hidden -> output
-          for (c = 0; c < layer1_size; c++) {
+          for (c = 0; c < layer1_size; ++c) {
             nnet->m_syn1[c + l2] += g * neu1[c];
           }
           pthread_mutex_unlock(&tlock);
@@ -264,7 +276,7 @@ static void train_w2v_layer(const opt_t *w2v_opts,
           l2 = target * layer1_size;
           f = 0;
           pthread_mutex_lock(&tlock);
-          for (c = 0; c < layer1_size; c++) {
+          for (c = 0; c < layer1_size; ++c) {
             f += neu1[c] * nnet->m_syn1neg[c + l2];
           }
           if (f > MAX_EXP) {
@@ -276,16 +288,16 @@ static void train_w2v_layer(const opt_t *w2v_opts,
                                          * (EXP_TABLE_SIZE / MAX_EXP / 2))])
                 * w2v_opts->m_alpha;
           }
-          for (c = 0; c < layer1_size; c++) {
+          for (c = 0; c < layer1_size; ++c) {
             neu1e[c] += g * nnet->m_syn1neg[c + l2];
           }
-          for (c = 0; c < layer1_size; c++) {
+          for (c = 0; c < layer1_size; ++c) {
             nnet->m_syn1neg[c + l2] += g * neu1[c];
           }
           pthread_mutex_unlock(&tlock);
         }
       // hidden -> in
-      for (a = b; a < window * 2 + 1 - b; a++) {
+      for (a = b; a < window * 2 + 1 - b; ++a) {
         if (a != window) {
           c = sentence_position - window + a;
           if (c < 0)
@@ -299,7 +311,7 @@ static void train_w2v_layer(const opt_t *w2v_opts,
             continue;
 
           pthread_mutex_lock(&tlock);
-          for (c = 0; c < layer1_size; c++) {
+          for (c = 0; c < layer1_size; ++c) {
             nnet->m_syn0[c + last_word * layer1_size] += neu1e[c];
           }
           pthread_mutex_unlock(&tlock);
@@ -307,7 +319,7 @@ static void train_w2v_layer(const opt_t *w2v_opts,
       }
     }
   } else {  //train skip-gram
-    for (a = b; a < window * 2 + 1 - b; a++)
+    for (a = b; a < window * 2 + 1 - b; ++a)
       if (a != window) {
         c = sentence_position - window + a;
         if (c < 0) continue;
@@ -315,24 +327,30 @@ static void train_w2v_layer(const opt_t *w2v_opts,
         last_word = sen[c];
         if (last_word == -1) continue;
         l1 = last_word * layer1_size;
-        for (c = 0; c < layer1_size; c++)
+        for (c = 0; c < layer1_size; ++c)
           neu1e[c] = 0;
         // HIERARCHICAL SOFTMAX
-        if (w2v_opts->m_hs) for (d = 0; d < vocab[word].codelen; d++) {
+        if (w2v_opts->m_hs) for (d = 0; d < vocab[word].codelen; ++d) {
             f = 0;
             l2 = vocab[word].point[d] * layer1_size;
             // Propagate hidden -> output
             pthread_mutex_lock(&tlock);
-            for (c = 0; c < layer1_size; c++) f += nnet->m_syn0[c + l1] * nnet->m_syn1[c + l2];
-            if (f <= -MAX_EXP) continue;
-            else if (f >= MAX_EXP) continue;
-            else f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+            for (c = 0; c < layer1_size; c++)
+              f += nnet->m_syn0[c + l1] * nnet->m_syn1[c + l2];
+
+            if (f <= -MAX_EXP)
+              continue;
+            else if (f >= MAX_EXP)
+              continue;
+            else
+              f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+
             // 'g' is the gradient multiplied by the learning rate
             g = (1 - vocab[word].code[d] - f) * w2v_opts->m_alpha;
             // Propagate errors output -> hidden
-            for (c = 0; c < layer1_size; c++) neu1e[c] += g * nnet->m_syn1[c + l2];
+            for (c = 0; c < layer1_size; ++c) neu1e[c] += g * nnet->m_syn1[c + l2];
             // Learn weights hidden -> output
-            for (c = 0; c < layer1_size; c++) {
+            for (c = 0; c < layer1_size; ++c) {
               nnet->m_syn1[c + l2] += g * nnet->m_syn0[c + l1];
             }
             pthread_mutex_unlock(&tlock);
@@ -353,7 +371,7 @@ static void train_w2v_layer(const opt_t *w2v_opts,
             l2 = target * layer1_size;
             f = 0;
             pthread_mutex_lock(&tlock);
-            for (c = 0; c < layer1_size; c++)
+            for (c = 0; c < layer1_size; ++c)
               f += nnet->m_syn0[c + l1] * nnet->m_syn1neg[c + l2];
 
             if (f > MAX_EXP)
@@ -365,17 +383,17 @@ static void train_w2v_layer(const opt_t *w2v_opts,
                                            * (EXP_TABLE_SIZE / MAX_EXP / 2))])
                   * w2v_opts->m_alpha;
 
-            for (c = 0; c < layer1_size; c++)
+            for (c = 0; c < layer1_size; ++c)
               neu1e[c] += g * nnet->m_syn1neg[c + l2];
 
-            for (c = 0; c < layer1_size; c++) {
+            for (c = 0; c < layer1_size; ++c) {
               nnet->m_syn1neg[c + l2] += g * nnet->m_syn0[c + l1];
             }
             pthread_mutex_unlock(&tlock);
           }
         // Learn weights input -> hidden
         pthread_mutex_lock(&tlock);
-        for (c = 0; c < layer1_size; c++) {
+        for (c = 0; c < layer1_size; ++c) {
           nnet->m_syn0[c + l1] += neu1e[c];
         }
         pthread_mutex_unlock(&tlock);
@@ -393,6 +411,7 @@ static void *train_model_thread(void *a_opts) {
   const int *vocab_hash = thread_opts->m_vocab->m_vocab_hash;
   const long long vocab_size = thread_opts->m_vocab->m_vocab_size;
   const long long train_words = thread_opts->m_vocab->m_train_words;
+  const multiclass_t *ref_multiclass = thread_opts->m_multiclass;
 
   const opt_t *w2v_opts = thread_opts->m_w2v_opts;
   const long long thread_id = (long long) thread_opts->m_thread_id;
@@ -400,15 +419,21 @@ static void *train_model_thread(void *a_opts) {
   const long long layer1_size = w2v_opts->m_layer1_size;
   const long long num_threads = w2v_opts->m_num_threads;
   const real sample = w2v_opts->m_sample;
+  const int consume_tab = w2v_opts->m_ts <= 0 && w2v_opts->m_ts_w2v <= 0 && \
+                          w2v_opts->m_ts_least_sq <= 0;
 
+  real *neu1 = (real *)calloc(layer1_size, sizeof(real));
+  real *neu1e = (real *)calloc(layer1_size, sizeof(real));
+
+  int active_tasks = 0;
+  multiclass_t multiclass;
   long long word, sentence_length = 0, sentence_position = 0;
   long long word_count_actual = 0;
   long long word_count = 0, last_word_count = 0, sen[MAX_SENTENCE_LENGTH + 1];
   long long local_iter = w2v_opts->m_iter;
   unsigned long long next_random = thread_id;
   clock_t now;
-  real *neu1 = (real *)calloc(layer1_size, sizeof(real));
-  real *neu1e = (real *)calloc(layer1_size, sizeof(real));
+
   FILE *fi = fopen(w2v_opts->m_train_file, "rb");
   fseek(fi, file_size / (long long) num_threads * (long long) next_random, SEEK_SET);
   while (1) {
@@ -422,7 +447,7 @@ static void *train_model_thread(void *a_opts) {
                 thread_opts->m_alpha,
                 word_count_actual / (real)(w2v_opts->m_iter * train_words + 1) * 100,
                 word_count_actual / ((real)(now - thread_opts->m_start + 1)
-                                     / (real)CLOCKS_PER_SEC * 1000));
+                                     / (real) CLOCKS_PER_SEC * 1000));
         fflush(stderr);
       }
       thread_opts->m_alpha = thread_opts->m_starting_alpha              \
@@ -434,7 +459,7 @@ static void *train_model_thread(void *a_opts) {
 
     if (sentence_length == 0) {
       while (1) {
-        word = read_word_index(fi, vocab, vocab_hash);
+        word = read_word_index(fi, vocab, vocab_hash, consume_tab);
         if (feof(fi))
           break;
 
@@ -459,6 +484,16 @@ static void *train_model_thread(void *a_opts) {
         if (sentence_length >= MAX_SENTENCE_LENGTH)
           break;
       }
+      if (!consume_tab) {
+        active_tasks = read_tags(fi, &multiclass);
+        if (active_tasks < 0) {
+          exit(EXIT_FAILURE);
+        /* skip lines for which no active tasks are defined */
+        } else if (active_tasks == 0 && w2v_opts->m_ts > 0) {
+          sentence_length = 0;
+          continue;
+        }
+      }
       sentence_position = 0;
     }
     if (feof(fi) || (word_count > train_words / num_threads)) {
@@ -477,11 +512,9 @@ static void *train_model_thread(void *a_opts) {
     if (word == -1)
       continue;
 
-    train_w2v_layer(w2v_opts, vocab, vocab_size,
-                    exp_table, table, window,
-                    layer1_size, nnet, sen, word,
-                    neu1, neu1e, sentence_length,
-                    sentence_position, &next_random);
+    train_w2v(w2v_opts, vocab, vocab_size, exp_table, table, window,
+              layer1_size, nnet, sen, word, neu1, neu1e, sentence_length,
+              sentence_position, &next_random);
 
     ++sentence_position;
     if (sentence_position >= sentence_length) {
@@ -530,6 +563,8 @@ void train_model(opt_t *a_opts) {
   vocab_t vocab;
   init_vocab(&vocab);
   multiclass_t multiclass;
+  reset_multiclass(&multiclass);
+
   size_t file_size = learn_vocab_from_trainfile(&vocab,
                                                 &multiclass,
                                                 a_opts);
@@ -545,7 +580,7 @@ void train_model(opt_t *a_opts) {
   thread_opts_t thread_opts = {clock(), file_size,
                                a_opts->m_alpha, a_opts->m_alpha,
                                0, a_opts, &vocab, &nnet,
-                               exp_table, ugram_table};
+                               exp_table, ugram_table, &multiclass};
 
   thread_opts_t *ptopts = (thread_opts_t *) malloc(a_opts->m_num_threads
                                                    * sizeof(thread_opts_t));

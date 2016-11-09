@@ -14,40 +14,83 @@
 /////////////
 
 // Reads a single word from a file, assuming space + tab + EOL to be word boundaries
-void read_word(char *word, FILE *fin) {
+void read_word(char *a_word, FILE *a_fin, const int a_consume_tab) {
   int a = 0, ch;
-  while (!feof(fin)) {
-    ch = fgetc(fin);
-    if (ch == 13) continue;
+  while (!feof(a_fin)) {
+    ch = fgetc(a_fin);
+    if (ch == 13)
+      continue;
+
     if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
       if (a > 0) {
-        if (ch == '\n') ungetc(ch, fin);
+        if (ch == '\n' || (ch == '\t' && !a_consume_tab))
+          ungetc(ch, a_fin);
+
         break;
       }
-      if (ch == '\n') {
-        strcpy(word, (char *)"</s>");
+      if (ch == '\n' || (ch == '\t' && !a_consume_tab)) {
+        strcpy(a_word, (char *)"</s>");
         return;
       } else {
         continue;
       }
     }
-    word[a] = ch;
+    a_word[a] = ch;
     ++a;
     if (a >= MAX_STRING - 1)
       --a;   // Truncate too long words
   }
-  word[a] = 0;
+  a_word[a] = 0;
 }
 
 // Reads a word and returns its index in the vocabulary
-int read_word_index(FILE *fin, const vw_t *a_vocab,
-                    const int *a_vocab_hash) {
+int read_word_index(FILE *a_fin, const vw_t *a_vocab,
+                    const int *a_vocab_hash, const int a_consume_tab) {
   char word[MAX_STRING];
-  read_word(word, fin);
-  if (feof(fin))
+  read_word(word, a_fin, a_consume_tab);
+  if (feof(a_fin))
     return -1;
 
   return search_vocab(word, a_vocab, a_vocab_hash);
+}
+
+int read_tags(FILE *a_fin, multiclass_t *a_multiclass) {
+  int active_tasks = 0, ntasks = 0;
+
+  int ch;
+  size_t nchars = 0;
+  int ret = 0, space_seen = 1;
+  char tag[MAX_STRING];
+
+  while (!feof(a_fin)) {
+    ch = fgetc(a_fin);
+    if (ch == 13)
+      continue;
+
+    if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
+      if (nchars) {
+        tag[nchars] = '\0';
+        ret = scanf(tag, "%d",
+                    &a_multiclass->m_max_classes[ntasks++]);
+        if (ret <= 0)
+          return -1;
+
+        ++active_tasks;
+        nchars = 0;
+      }
+      if (ch == '\n')
+        break;
+
+      space_seen = 1;
+    } else if (ch == '_') {
+      if (space_seen)
+        a_multiclass->m_max_classes[ntasks++] = -1;
+    } else {
+      tag[nchars++] = ch;
+      space_seen = 0;
+    }
+  }
+  return active_tasks;
 }
 
 static int process_line_w2v(vocab_t *a_vocab,
@@ -91,6 +134,7 @@ static int process_tag_line(multiclass_t *a_multiclass, const char *a_line,
   size_t m = 0, label = 0;
   int n = 0, seen_space = 0;
   int first_run = (a_multiclass->m_n_tasks == 0);
+
   for (i = 0; i < a_read; ++i) {
     if (isspace(a_line[i])) {
       seen_space = 1;
@@ -116,8 +160,8 @@ static int process_tag_line(multiclass_t *a_multiclass, const char *a_line,
         return -1;
       } else {
         /* increment the label by one for comparison */
-        if ((++label) > a_multiclass->m_max_classes[m])
-          a_multiclass->m_max_classes[m] = label;
+        if ((int) (++label) > a_multiclass->m_max_classes[m])
+          a_multiclass->m_max_classes[m] = (int) label;
 
         /* advance the pointer to the end of number */
         i += (size_t) tag_len;

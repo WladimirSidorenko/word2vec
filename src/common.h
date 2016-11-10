@@ -24,12 +24,16 @@ typedef float real;                    // Precision of float numbers
 /////////////
 
 /**
- * Statistics about multiple task classes.
+ * Statistics about specific tasks.
+ *
+ * This struct holds statistics about user-defined tasks such as the
+ * total number of tasks and the maximum number of classes
+ * distinguished by each task.
  */
 typedef struct {
-  //< number of tasks in a multitask setting
+  /** Total number of user-defined tasks. */
   size_t m_n_tasks;
-  //< maximum number of classes for each task
+  /** Maximum number of classes for each particular task. */
   int m_max_classes[MAX_TASKS];
 } multiclass_t;
 
@@ -63,6 +67,17 @@ struct opt {
    *  latter representation */
   int m_ts_least_sq;
 };
+
+typedef struct {
+  /* layers specific to the classical word2vec objective */
+  real *m_syn0;
+  real *m_syn1;
+  real *m_syn1neg;
+
+  /* task-specific layers */
+  size_t m_n_tasks;
+  real **m_vec2task;
+} nnet_t;
 
 /////////////
 // Methods //

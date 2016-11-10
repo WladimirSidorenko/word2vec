@@ -10,22 +10,12 @@
 #include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>  /* memset */
 #include <time.h>
 
 /////////////
 // Structs //
 /////////////
-typedef struct {
-  /* layers specific to the classical word2vec objective */
-  real *m_syn0;
-  real *m_syn1;
-  real *m_syn1neg;
-
-  /* task-specific layers */
-  size_t m_n_tasks;
-  real **m_vec2task;
-} nnet_t;
-
 typedef struct {
   clock_t m_start;
   size_t m_file_size;
@@ -60,14 +50,12 @@ static void copy_thread_opts(const thread_opts_t *src_opts,
   trg_opts->m_nnet = src_opts->m_nnet;
   trg_opts->m_exp_table = src_opts->m_exp_table;
   trg_opts->m_ugram_table = src_opts->m_ugram_table;
+  trg_opts->m_multiclass = src_opts->m_multiclass;
 }
 
 static void reset_multiclass(multiclass_t *a_multiclass) {
   a_multiclass->m_n_tasks = 0;
-
-  size_t i;
-  for (i = 0; i < MAX_TASKS; ++i)
-    a_multiclass->m_max_classes[i] = -1;
+  memset(a_multiclass->m_max_classes, -1, sizeof(int) * MAX_TASKS);
 }
 
 static void reset_nnet(nnet_t *a_nnet) {
@@ -107,9 +95,8 @@ static real *init_exp_table(void) {
 
 static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
                          const opt_t *a_opts, const multiclass_t *a_multiclass) {
-  /* we will probably need opts later for allocating memory to the
-   * least squares */
-  UNUSED(a_opts);
+  unsigned long long next_random = 1;
+  long long layer1_size = a_opts->m_layer1_size;
   long long vocab_size = a_vocab->m_vocab_size;
   a_nnet->m_n_tasks = a_multiclass->m_n_tasks;
   /* allocate memory for task-specific weight matrices */
@@ -118,15 +105,34 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
     fprintf(stderr, "Could not allocate memory for m_vec2task.\n");
     exit(8);
   }
-  int a;
   size_t i;
+  real *v2t_layer;
+  long long a, b;
   for (i = 0; i < a_nnet->m_n_tasks; ++i) {
     a = posix_memalign((void **) &a_nnet->m_vec2task[i], 128,
-                       (long long) vocab_size * a_multiclass->m_max_classes[i]
+                       (long long) a_multiclass->m_max_classes[i] * layer1_size
                        * sizeof(real));
     if (a) {
       fprintf(stderr, "Could not allocate memory for task-specific coefficients.\n");
       exit(9);
+    }
+    v2t_layer = a_nnet->m_vec2task[i];
+    for (a = 0; a < vocab_size; ++a) {
+      next_random = next_random * (unsigned long long)25214903917 + 11;
+      v2t_layer[a] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size;
+    }
+  }
+
+  if (a_opts->m_ts > 0) {
+    a = posix_memalign((void **) &a_nnet->m_syn0, 128,
+                       (long long) vocab_size
+                       * layer1_size * sizeof(real));
+    for (a = 0; a < vocab_size; ++a) {
+      for (b = 0; b < layer1_size; ++b) {
+        next_random = next_random * (unsigned long long)25214903917 + 11;
+        a_nnet->m_syn0[a * layer1_size + b] = (((next_random & 0xFFFF)
+                                                / (real)65536) - 0.5) / layer1_size;
+      }
     }
   }
 }
@@ -319,7 +325,7 @@ static void train_w2v(const opt_t *w2v_opts,
       }
     }
   } else {  //train skip-gram
-    for (a = b; a < window * 2 + 1 - b; ++a)
+    for (a = b; a < window * 2 + 1 - b; ++a) {
       if (a != window) {
         c = sentence_position - window + a;
         if (c < 0) continue;
@@ -398,6 +404,7 @@ static void train_w2v(const opt_t *w2v_opts,
         }
         pthread_mutex_unlock(&tlock);
       }
+    }
   }
 }
 
@@ -412,6 +419,7 @@ static void *train_model_thread(void *a_opts) {
   const long long vocab_size = thread_opts->m_vocab->m_vocab_size;
   const long long train_words = thread_opts->m_vocab->m_train_words;
   const multiclass_t *ref_multiclass = thread_opts->m_multiclass;
+  const size_t n_tasks = ref_multiclass->m_n_tasks;
 
   const opt_t *w2v_opts = thread_opts->m_w2v_opts;
   const long long thread_id = (long long) thread_opts->m_thread_id;
@@ -427,6 +435,7 @@ static void *train_model_thread(void *a_opts) {
 
   int active_tasks = 0;
   multiclass_t multiclass;
+  reset_multiclass(&multiclass);
   long long word, sentence_length = 0, sentence_position = 0;
   long long word_count_actual = 0;
   long long word_count = 0, last_word_count = 0, sen[MAX_SENTENCE_LENGTH + 1];
@@ -486,12 +495,13 @@ static void *train_model_thread(void *a_opts) {
       }
       if (!consume_tab) {
         active_tasks = read_tags(fi, &multiclass);
+        fprintf(stderr, "train.c: active_tasks = %d\n", active_tasks);
         if (active_tasks < 0) {
           exit(EXIT_FAILURE);
         /* skip lines for which no active tasks are defined */
         } else if (active_tasks == 0 && w2v_opts->m_ts > 0) {
           sentence_length = 0;
-          continue;
+          break;
         }
       }
       sentence_position = 0;
@@ -512,9 +522,11 @@ static void *train_model_thread(void *a_opts) {
     if (word == -1)
       continue;
 
-    train_w2v(w2v_opts, vocab, vocab_size, exp_table, table, window,
-              layer1_size, nnet, sen, word, neu1, neu1e, sentence_length,
-              sentence_position, &next_random);
+    if (w2v_opts->m_ts <= 0) {
+      train_w2v(w2v_opts, vocab, vocab_size, exp_table, table, window,
+                layer1_size, nnet, sen, word, neu1, neu1e, sentence_length,
+                sentence_position, &next_random);
+    }
 
     ++sentence_position;
     if (sentence_position >= sentence_length) {
@@ -522,37 +534,11 @@ static void *train_model_thread(void *a_opts) {
       continue;
     }
   }
+  fprintf(stderr, "train.c: loop left\n");
   fclose(fi);
   free(neu1);
   free(neu1e);
   pthread_exit(NULL);
-}
-
-static void save_embeddings(const opt_t *a_opts, const vocab_t *a_vocab,
-                            const nnet_t *a_nnet) {
-  FILE *fo = a_opts->m_output_file[0]? \
-             fopen(a_opts->m_output_file, "wb"): stdout;
-
-  long long vocab_size = a_vocab->m_vocab_size;
-  const vw_t *vocab = a_vocab->m_vocab;
-
-  // Save the word vectors
-  fprintf(fo, "%lld %lld\n", vocab_size, a_opts->m_layer1_size);
-  long a, b;
-  for (a = 0; a < vocab_size; ++a) {
-    fprintf(fo, "%s ", vocab[a].word);
-    if (a_opts->m_binary)
-      for (b = 0; b < a_opts->m_layer1_size; ++b)
-        fwrite(&a_nnet->m_syn0[a * a_opts->m_layer1_size + b], sizeof(real), 1, fo);
-    else
-      for (b = 0; b < a_opts->m_layer1_size; ++b)
-        fprintf(fo, "%lf ", a_nnet->m_syn0[a * a_opts->m_layer1_size + b]);
-
-    fprintf(fo, "\n");
-  }
-
-  if (a_opts->m_output_file[0])
-    fclose(fo);
 }
 
 void train_model(opt_t *a_opts) {
@@ -568,6 +554,7 @@ void train_model(opt_t *a_opts) {
   size_t file_size = learn_vocab_from_trainfile(&vocab,
                                                 &multiclass,
                                                 a_opts);
+
   real *exp_table = init_exp_table();
 
   nnet_t nnet;
@@ -586,18 +573,18 @@ void train_model(opt_t *a_opts) {
                                                    * sizeof(thread_opts_t));
   pthread_t *pt = (pthread_t *) malloc(a_opts->m_num_threads
                                        * sizeof(pthread_t));
-  long a;
   if (pthread_mutex_init(&tlock, NULL)) {
     fprintf(stderr, "\nmutex init failed\n");
     exit(5);
   }
 
+  long a;
   for (a = 0; a < a_opts->m_num_threads; ++a) {
     copy_thread_opts(&thread_opts, &ptopts[a], a);
     pthread_create(&pt[a], NULL, train_model_thread,
                    (void *) &ptopts[a]);
   }
-  for (a = 0; a < a_opts->m_num_threads; a++)
+  for (a = 0; a < a_opts->m_num_threads; ++a)
     pthread_join(pt[a], NULL);
 
   save_embeddings(a_opts, &vocab, &nnet);

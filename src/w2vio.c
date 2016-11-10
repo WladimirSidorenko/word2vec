@@ -59,7 +59,7 @@ int read_tags(FILE *a_fin, multiclass_t *a_multiclass) {
 
   int ch;
   size_t nchars = 0;
-  int ret = 0, space_seen = 1;
+  int ret = 0, space_seen = 1, uscore_seen = 0;
   char tag[MAX_STRING];
 
   while (!feof(a_fin)) {
@@ -70,8 +70,8 @@ int read_tags(FILE *a_fin, multiclass_t *a_multiclass) {
     if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
       if (nchars) {
         tag[nchars] = '\0';
-        ret = scanf(tag, "%d",
-                    &a_multiclass->m_max_classes[ntasks++]);
+        ret = sscanf(tag, "%d",
+                     &a_multiclass->m_max_classes[ntasks++]);
         if (ret <= 0)
           return -1;
 
@@ -82,11 +82,21 @@ int read_tags(FILE *a_fin, multiclass_t *a_multiclass) {
         break;
 
       space_seen = 1;
-    } else if (ch == '_') {
-      if (space_seen)
-        a_multiclass->m_max_classes[ntasks++] = -1;
+      uscore_seen = 0;
     } else {
-      tag[nchars++] = ch;
+      if (ch == '_') {
+        if (uscore_seen)
+          continue;
+        else if (space_seen)
+          a_multiclass->m_max_classes[ntasks++] = -1;
+        else
+          return -1;
+
+        uscore_seen = 1;
+      } else {
+        tag[nchars++] = ch;
+        uscore_seen = 0;
+      }
       space_seen = 0;
     }
   }
@@ -272,4 +282,32 @@ size_t learn_vocab_from_trainfile(vocab_t *a_vocab, multiclass_t *a_multiclass,
   size_t file_size = ftell(fin);
   fclose(fin);
   return file_size;
+}
+
+void save_embeddings(const opt_t *a_opts, const vocab_t *a_vocab,
+                     const nnet_t *a_nnet) {
+  FILE *fo = a_opts->m_output_file[0]?                          \
+             fopen(a_opts->m_output_file, "wb"): stdout;
+
+  long long layer1_size = a_opts->m_layer1_size;
+  long long vocab_size = a_vocab->m_vocab_size;
+  const vw_t *vocab = a_vocab->m_vocab;
+
+  // Save the word vectors
+  fprintf(fo, "%lld %lld\n", vocab_size, layer1_size);
+  long a, b;
+  for (a = 0; a < vocab_size; ++a) {
+    fprintf(fo, "%s ", vocab[a].word);
+    if (a_opts->m_binary)
+      for (b = 0; b < layer1_size; ++b)
+        fwrite(&a_nnet->m_syn0[a * layer1_size + b], sizeof(real), 1, fo);
+    else
+      for (b = 0; b < layer1_size; ++b)
+        fprintf(fo, "%lf ", a_nnet->m_syn0[a * layer1_size + b]);
+
+    fprintf(fo, "\n");
+  }
+
+  if (a_opts->m_output_file[0])
+    fclose(fo);
 }

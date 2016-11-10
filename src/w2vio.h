@@ -71,4 +71,18 @@ int read_tags(FILE *a_fin, multiclass_t *a_multiclass);
  */
 size_t learn_vocab_from_trainfile(vocab_t *a_vocab, multiclass_t *a_multiclass,
                                   opt_t *a_opts);
+
+/**
+ * Output .
+ *
+ * @param a_opts - word to search for
+ * @type const opt_t *
+ * @param a_vocab - vocabulary to populate
+ * @type const vocab_t *
+ * @param a_nnet - neural net with trained parameters
+ * @type const nnet_t *
+ *
+ * @return \c size_t - size of the input file
+ */
+void save_embeddings(const opt_t *a_fo, const vocab_t *a_vocab, const nnet_t *a_nnet);
 #endif  /* ifndef __WORD2VEC_IO_H__ */

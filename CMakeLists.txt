@@ -5,9 +5,20 @@ SET(word2vec_VERSION_MAJOR 0)
 SET(word2vec_VERSION_MINOR 1)
 
 FIND_PACKAGE (Threads)
+FIND_PACKAGE(Doxygen QUIET)
+IF(DOXYGEN_FOUND)
+  SET(W2V_ASSET_DIR ${CMAKE_CURRENT_SOURCE_DIR}/doc/static)
+  CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+  ADD_CUSTOM_TARGET(doc
+    ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Generating API documentation with Doxygen" VERBATIM
+    )
+ENDIF(DOXYGEN_FOUND)
 
 ADD_DEFINITIONS(-Wall -Wextra -fopenmp  -funroll-loops #
 		      -march=native -funroll-loops -Ofast)
+
 
 # specify output directory
 SET(EXECUTABLE_OUTPUT_PATH bin)

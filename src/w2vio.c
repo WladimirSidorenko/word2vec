@@ -71,7 +71,7 @@ int read_tags(FILE *a_fin, multiclass_t *a_multiclass) {
       if (nchars) {
         tag[nchars] = '\0';
         ret = sscanf(tag, "%d",
-                     &a_multiclass->m_max_classes[ntasks++]);
+                     &a_multiclass->m_classes[ntasks++]);
         if (ret <= 0)
           return -1;
 
@@ -88,7 +88,7 @@ int read_tags(FILE *a_fin, multiclass_t *a_multiclass) {
         if (uscore_seen)
           continue;
         else if (space_seen)
-          a_multiclass->m_max_classes[ntasks++] = -1;
+          a_multiclass->m_classes[ntasks++] = -1;
         else
           return -1;
 
@@ -170,8 +170,8 @@ static int process_tag_line(multiclass_t *a_multiclass, const char *a_line,
         return -1;
       } else {
         /* increment the label by one for comparison */
-        if ((int) (++label) > a_multiclass->m_max_classes[m])
-          a_multiclass->m_max_classes[m] = (int) label;
+        if ((int) (++label) > a_multiclass->m_classes[m])
+          a_multiclass->m_classes[m] = (int) label;
 
         /* advance the pointer to the end of number */
         i += (size_t) tag_len;

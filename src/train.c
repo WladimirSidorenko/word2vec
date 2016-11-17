@@ -16,6 +16,12 @@
 /////////////
 // Structs //
 /////////////
+
+/**
+ * \struct thread_opts_t
+ * \brief options required by each thread
+ *
+ */
 typedef struct {
   clock_t m_start;
   size_t m_file_size;
@@ -27,7 +33,7 @@ typedef struct {
   nnet_t *m_nnet;
   const real *m_exp_table;
   const int *m_ugram_table;
-  const multiclass_t *m_multiclass;
+  size_t m_n_tasks;
 } thread_opts_t;
 
 ///////////////
@@ -50,12 +56,12 @@ static void copy_thread_opts(const thread_opts_t *src_opts,
   trg_opts->m_nnet = src_opts->m_nnet;
   trg_opts->m_exp_table = src_opts->m_exp_table;
   trg_opts->m_ugram_table = src_opts->m_ugram_table;
-  trg_opts->m_multiclass = src_opts->m_multiclass;
+  trg_opts->m_n_tasks = src_opts->m_n_tasks;
 }
 
 static void reset_multiclass(multiclass_t *a_multiclass) {
   a_multiclass->m_n_tasks = 0;
-  memset(a_multiclass->m_max_classes, -1, sizeof(int) * MAX_TASKS);
+  memset(a_multiclass->m_classes, -1, sizeof(int) * MAX_TASKS);
 }
 
 static void reset_nnet(nnet_t *a_nnet) {
@@ -110,7 +116,7 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
   long long a, b;
   for (i = 0; i < a_nnet->m_n_tasks; ++i) {
     a = posix_memalign((void **) &a_nnet->m_vec2task[i], 128,
-                       (long long) a_multiclass->m_max_classes[i] * layer1_size
+                       (long long) a_multiclass->m_classes[i] * layer1_size
                        * sizeof(real));
     if (a) {
       fprintf(stderr, "Could not allocate memory for task-specific coefficients.\n");
@@ -123,6 +129,7 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
     }
   }
 
+  /* initialize array for storing task-specific embeddings */
   if (a_opts->m_ts > 0) {
     a = posix_memalign((void **) &a_nnet->m_syn0, 128,
                        (long long) vocab_size
@@ -344,9 +351,7 @@ static void train_w2v(const opt_t *w2v_opts,
             for (c = 0; c < layer1_size; c++)
               f += nnet->m_syn0[c + l1] * nnet->m_syn1[c + l2];
 
-            if (f <= -MAX_EXP)
-              continue;
-            else if (f >= MAX_EXP)
+            if (f <= -MAX_EXP || f >= MAX_EXP)
               continue;
             else
               f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
@@ -408,6 +413,54 @@ static void train_w2v(const opt_t *w2v_opts,
   }
 }
 
+static void train_ts(const multiclass_t  *multiclass, long long word,
+                     const real alpha, const int active_tasks,
+                     const long long layer1_size, const real *exp_table,
+                     nnet_t *nnet) {
+  size_t i;
+  long long l2;
+  real f, g, syn0_orig;
+  int label, j = 0, c = 0;
+  real *label_weights = NULL;
+  long long w_idx = word * layer1_size;
+  for (i = 0; i < multiclass->m_n_tasks && j < active_tasks; ++i) {
+    label = multiclass->m_classes[i];
+    if (label >= 0) {
+      ++j;
+      f = 0;
+
+      label_weights = nnet->m_vec2task[i];
+      l2 = label * layer1_size;
+      pthread_mutex_lock(&tlock);
+      /* compute decision */
+      for (c = 0; c < layer1_size; ++c) {
+        f += nnet->m_syn0[c + w_idx]  * label_weights[l2 + c];
+      }
+
+      /* compute gradient */
+      if (f > MAX_EXP) {
+        /* for maximum scores, do nothing */
+        pthread_mutex_unlock(&tlock);
+        continue;
+      } else {
+        if (f < -MAX_EXP)
+          f = -MAX_EXP;
+
+        g = alpha * exp_table[(int)((f + MAX_EXP)
+                                    * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+
+        /* propagate gradient to word embeddings and task-specific coefficients */
+        for (c = 0; c < layer1_size; ++c) {
+          syn0_orig = nnet->m_syn0[c + w_idx];
+          nnet->m_syn0[c + w_idx] += g * label_weights[l2 + c];
+          label_weights[l2 + c] += g * syn0_orig;
+        }
+        pthread_mutex_unlock(&tlock);
+      }
+    }
+  }
+}
+
 static void *train_model_thread(void *a_opts) {
   thread_opts_t *thread_opts = (thread_opts_t *) a_opts;
   const long long file_size = thread_opts->m_file_size;
@@ -418,8 +471,6 @@ static void *train_model_thread(void *a_opts) {
   const int *vocab_hash = thread_opts->m_vocab->m_vocab_hash;
   const long long vocab_size = thread_opts->m_vocab->m_vocab_size;
   const long long train_words = thread_opts->m_vocab->m_train_words;
-  const multiclass_t *ref_multiclass = thread_opts->m_multiclass;
-  const size_t n_tasks = ref_multiclass->m_n_tasks;
 
   const opt_t *w2v_opts = thread_opts->m_w2v_opts;
   const long long thread_id = (long long) thread_opts->m_thread_id;
@@ -436,6 +487,7 @@ static void *train_model_thread(void *a_opts) {
   int active_tasks = 0;
   multiclass_t multiclass;
   reset_multiclass(&multiclass);
+  multiclass.m_n_tasks = thread_opts->m_n_tasks;
   long long word, sentence_length = 0, sentence_position = 0;
   long long word_count_actual = 0;
   long long word_count = 0, last_word_count = 0, sen[MAX_SENTENCE_LENGTH + 1];
@@ -495,7 +547,6 @@ static void *train_model_thread(void *a_opts) {
       }
       if (!consume_tab) {
         active_tasks = read_tags(fi, &multiclass);
-        fprintf(stderr, "train.c: active_tasks = %d\n", active_tasks);
         if (active_tasks < 0) {
           exit(EXIT_FAILURE);
         /* skip lines for which no active tasks are defined */
@@ -522,6 +573,12 @@ static void *train_model_thread(void *a_opts) {
     if (word == -1)
       continue;
 
+    /* train task-specific embeddings */
+    if (w2v_opts->m_ts > 0 || w2v_opts->m_ts_w2v > 0) {
+      train_ts(&multiclass, word, thread_opts->m_alpha,
+               active_tasks, layer1_size, exp_table, nnet);
+    }
+    /* train plain word2vec objective */
     if (w2v_opts->m_ts <= 0) {
       train_w2v(w2v_opts, vocab, vocab_size, exp_table, table, window,
                 layer1_size, nnet, sen, word, neu1, neu1e, sentence_length,
@@ -550,16 +607,10 @@ void train_model(opt_t *a_opts) {
   init_vocab(&vocab);
   multiclass_t multiclass;
   reset_multiclass(&multiclass);
-
-  size_t file_size = learn_vocab_from_trainfile(&vocab,
-                                                &multiclass,
-                                                a_opts);
-
+  size_t file_size = learn_vocab_from_trainfile(&vocab, &multiclass, a_opts);
   real *exp_table = init_exp_table();
-
   nnet_t nnet;
   init_nnet(&nnet, &vocab, a_opts, &multiclass);
-
   int *ugram_table = NULL;
   if (a_opts->m_negative > 0)
     ugram_table = init_unigram_table(&vocab);
@@ -567,8 +618,7 @@ void train_model(opt_t *a_opts) {
   thread_opts_t thread_opts = {clock(), file_size,
                                a_opts->m_alpha, a_opts->m_alpha,
                                0, a_opts, &vocab, &nnet,
-                               exp_table, ugram_table, &multiclass};
-
+                               exp_table, ugram_table, multiclass.m_n_tasks};
   thread_opts_t *ptopts = (thread_opts_t *) malloc(a_opts->m_num_threads
                                                    * sizeof(thread_opts_t));
   pthread_t *pt = (pthread_t *) malloc(a_opts->m_num_threads

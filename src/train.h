@@ -1,3 +1,8 @@
+/**
+ * @file train.h
+ * @brief Declaration of the training functions.
+ */
+
 #ifndef __WORD2VEC_TRAIN_H__
 # define __WORD2VEC_TRAIN_H__
 

@@ -16,9 +16,11 @@ IF(DOXYGEN_FOUND)
     )
 ENDIF(DOXYGEN_FOUND)
 
-ADD_DEFINITIONS(-Wall -Wextra -fopenmp  -funroll-loops #
-		      -march=native -funroll-loops -Ofast)
-
+ADD_DEFINITIONS(-Wall -Wextra -funroll-loops #
+  -march=native -funroll-loops -Ofast)
+IF(OPENMP_FOUND)
+  ADD_DEFINITIONS(OpenMP_C_FLAGS)
+ENDIF(OPENMP_FOUND)
 
 # specify output directory
 SET(EXECUTABLE_OUTPUT_PATH bin)

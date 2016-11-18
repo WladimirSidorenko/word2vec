@@ -201,7 +201,7 @@ static void init_nnet(nnet_t *a_nnet, vocab_t *a_vocab,
     init_w2v_nnet(a_nnet, a_vocab, a_opts);
 }
 
-static void train_w2v(const opt_t *w2v_opts,
+static real train_w2v(const opt_t *w2v_opts,
                       const vw_t *vocab, const long long vocab_size,
                       const real *exp_table, const int *table,
                       const int window, const long long layer1_size,
@@ -210,7 +210,7 @@ static void train_w2v(const opt_t *w2v_opts,
                       long long sentence_length,
                       long long sentence_position,
                       unsigned long long *next_random) {
-  real f, g;
+  real f, g, total_cost = 0;
   long long a, b, c, cw, d, last_word, label, l1, l2, target;
 
   for (c = 0; c < layer1_size; ++c)
@@ -224,7 +224,8 @@ static void train_w2v(const opt_t *w2v_opts,
   if (w2v_opts->m_cbow) {  //train the cbow architecture
     // in -> hidden
     cw = 0;
-    for (a = b; a < window * 2 + 1 - b; ++a)
+    for (a = b; a < window * 2 + 1 - b; ++a) {
+
       if (a != window) {
         c = sentence_position - window + a;
         if (c < 0)
@@ -242,6 +243,7 @@ static void train_w2v(const opt_t *w2v_opts,
         }
         ++cw;
       }
+    }
     if (cw) {
       for (c = 0; c < layer1_size; ++c)
         neu1[c] /= cw;
@@ -261,7 +263,9 @@ static void train_w2v(const opt_t *w2v_opts,
             f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
 
           // 'g' is the gradient multiplied by the learning rate
-          g = (1 - vocab[word].code[d] - f) * w2v_opts->m_alpha;
+          g = (1 - vocab[word].code[d] - f);
+          total_cost += g;
+          g *= w2v_opts->m_alpha;
           // Propagate errors output -> hidden
           for (c = 0; c < layer1_size; ++c) {
             neu1e[c] += g * nnet->m_syn1[c + l2];
@@ -298,8 +302,9 @@ static void train_w2v(const opt_t *w2v_opts,
             g = (label - 0) * w2v_opts->m_alpha;
           } else {
             g = (label - exp_table[(int)((f + MAX_EXP)
-                                         * (EXP_TABLE_SIZE / MAX_EXP / 2))])
-                * w2v_opts->m_alpha;
+                                         * (EXP_TABLE_SIZE / MAX_EXP / 2))]);
+            total_cost += g;
+            g *= w2v_opts->m_alpha;
           }
           for (c = 0; c < layer1_size; ++c) {
             neu1e[c] += g * nnet->m_syn1neg[c + l2];
@@ -357,7 +362,9 @@ static void train_w2v(const opt_t *w2v_opts,
               f = exp_table[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
 
             // 'g' is the gradient multiplied by the learning rate
-            g = (1 - vocab[word].code[d] - f) * w2v_opts->m_alpha;
+            g = (1 - vocab[word].code[d] - f);
+            total_cost += g;
+            g *= w2v_opts->m_alpha;
             // Propagate errors output -> hidden
             for (c = 0; c < layer1_size; ++c) neu1e[c] += g * nnet->m_syn1[c + l2];
             // Learn weights hidden -> output
@@ -385,6 +392,7 @@ static void train_w2v(const opt_t *w2v_opts,
             for (c = 0; c < layer1_size; ++c)
               f += nnet->m_syn0[c + l1] * nnet->m_syn1neg[c + l2];
 
+            total_cost += f;
             if (f > MAX_EXP)
               g = (label - 1) * w2v_opts->m_alpha;
             else if (f < -MAX_EXP)
@@ -411,18 +419,18 @@ static void train_w2v(const opt_t *w2v_opts,
       }
     }
   }
+  return total_cost;
 }
 
-static void train_ts(const multiclass_t  *multiclass, long long word,
+static real train_ts(const multiclass_t  *multiclass, long long word,
                      const real alpha, const int active_tasks,
                      const long long layer1_size, const real *exp_table,
                      nnet_t *nnet) {
-  size_t i;
-  long long l2;
-  real f, g, syn0_orig;
-  int label, j = 0, c = 0;
+  real f, g, syn0_orig, total_cost = 0;
+  long long l2, w_idx = word * layer1_size;
   real *label_weights = NULL;
-  long long w_idx = word * layer1_size;
+  size_t i;
+  int label, j = 0, c = 0;
   for (i = 0; i < multiclass->m_n_tasks && j < active_tasks; ++i) {
     label = multiclass->m_classes[i];
     if (label >= 0) {
@@ -433,9 +441,8 @@ static void train_ts(const multiclass_t  *multiclass, long long word,
       l2 = label * layer1_size;
       pthread_mutex_lock(&tlock);
       /* compute decision */
-      for (c = 0; c < layer1_size; ++c) {
+      for (c = 0; c < layer1_size; ++c)
         f += nnet->m_syn0[c + w_idx]  * label_weights[l2 + c];
-      }
 
       /* compute gradient */
       if (f > MAX_EXP) {
@@ -446,9 +453,10 @@ static void train_ts(const multiclass_t  *multiclass, long long word,
         if (f < -MAX_EXP)
           f = -MAX_EXP;
 
-        g = alpha * exp_table[(int)((f + MAX_EXP)
-                                    * (EXP_TABLE_SIZE / MAX_EXP / 2))];
-
+        g = exp_table[(int)((f + MAX_EXP)
+                            * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+        total_cost += 1 - g;
+        g *= alpha;
         /* propagate gradient to word embeddings and task-specific coefficients */
         for (c = 0; c < layer1_size; ++c) {
           syn0_orig = nnet->m_syn0[c + w_idx];
@@ -459,9 +467,11 @@ static void train_ts(const multiclass_t  *multiclass, long long word,
       }
     }
   }
+  return total_cost;
 }
 
 static void *train_model_thread(void *a_opts) {
+  real total_cost = 0;
   thread_opts_t *thread_opts = (thread_opts_t *) a_opts;
   const long long file_size = thread_opts->m_file_size;
   nnet_t *nnet = thread_opts->m_nnet;
@@ -552,17 +562,20 @@ static void *train_model_thread(void *a_opts) {
         /* skip lines for which no active tasks are defined */
         } else if (active_tasks == 0 && w2v_opts->m_ts > 0) {
           sentence_length = 0;
-          break;
         }
       }
       sentence_position = 0;
     }
     if (feof(fi) || (word_count > train_words / num_threads)) {
+      /* fprintf(stderr, "thread %lld [iteration %lld]: total_cost = %f\n", */
+      /*         thread_id, local_iter, total_cost); */
       word_count_actual += word_count - last_word_count;
       --local_iter;
+
       if (local_iter == 0)
         break;
 
+      total_cost = 0;
       word_count = 0;
       last_word_count = 0;
       sentence_length = 0;
@@ -575,14 +588,14 @@ static void *train_model_thread(void *a_opts) {
 
     /* train task-specific embeddings */
     if (w2v_opts->m_ts > 0 || w2v_opts->m_ts_w2v > 0) {
-      train_ts(&multiclass, word, thread_opts->m_alpha,
-               active_tasks, layer1_size, exp_table, nnet);
+      total_cost += train_ts(&multiclass, word, thread_opts->m_alpha,
+                             active_tasks, layer1_size, exp_table, nnet);
     }
     /* train plain word2vec objective */
     if (w2v_opts->m_ts <= 0) {
-      train_w2v(w2v_opts, vocab, vocab_size, exp_table, table, window,
-                layer1_size, nnet, sen, word, neu1, neu1e, sentence_length,
-                sentence_position, &next_random);
+      total_cost += train_w2v(w2v_opts, vocab, vocab_size, exp_table, table, window,
+                              layer1_size, nnet, sen, word, neu1, neu1e, sentence_length,
+                              sentence_position, &next_random);
     }
 
     ++sentence_position;
@@ -591,7 +604,6 @@ static void *train_model_thread(void *a_opts) {
       continue;
     }
   }
-  fprintf(stderr, "train.c: loop left\n");
   fclose(fi);
   free(neu1);
   free(neu1e);

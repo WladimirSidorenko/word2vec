@@ -3,18 +3,30 @@
 ##################################################################
 # Variables
 BIN=${1}
-INPUT='tokens.sample.tok'
-OUTPUT='vec.1.1.out'
-EXPECTED='vec.1.1.expected'
+INPUT_0='test_1.0.in'
+INPUT_1='test_1.1.in'
+OUTPUT_0='test_1.0.out'
+OUTPUT_1='test_1.1.out'
+EXPECTED_0='test_1.0.expected'
+EXPECTED_1='test_1.1.expected'
+TEST_NAME='task_specific'
 
 ##################################################################
 # Test 0
-echo $BINDIR >&2
-${BIN} -train "${INPUT}" -output "${OUTPUT}" -threads 1
-diff -q "${OUTPUT}" "${EXPECTED}" > /dev/null
+echo '1..2'
+${BIN} -min-count 0 -train "${INPUT_0}" -output "${OUTPUT_0}" -threads 1
+diff -q "${OUTPUT_0}" "${EXPECTED_0}" > /dev/null
 if test $? -eq 0; then
-    echo 'ok single_thread_original # single-threaded implementation returns original vectors'
+    echo 'ok 1 # trained word vectors match the task'
 else
-    echo 'not ok single_thread_original # single-threaded implementation does not' \
-	' return original vectors'
+    echo 'not ok 1 # trained word vectors do not match the tasks'
+fi
+
+${BIN} -min-count 0 -iter 500 -size 2 -ts 1 -threads 1 \
+    -train "${INPUT_1}" -output "${OUTPUT_1}"
+diff -q "${OUTPUT_1}" "${EXPECTED_1}" > /dev/null
+if test $? -eq 0; then
+    echo 'ok 2 # trained word vectors match the task'
+else
+    echo 'not ok 2 # trained word vectors do not match the tasks'
 fi

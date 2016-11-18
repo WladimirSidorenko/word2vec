@@ -1,0 +1,20 @@
+#!/bin/sh
+
+##################################################################
+# Variables
+BIN=${1}
+INPUT='test_0.0.in'
+OUTPUT='test_0.0.out'
+EXPECTED='test_0.0.expected'
+TEST_NAME='word2vec_compatibility'
+
+##################################################################
+# Test 0
+echo '1..1'
+${BIN} -train "${INPUT}" -output "${OUTPUT}" -threads 1
+diff -q "${OUTPUT}" "${EXPECTED}" > /dev/null
+if test $? -eq 0; then
+    echo 'ok 1 # trained word vectors are identical with original word2vec'
+else
+    echo 'not ok 1 # trained word vectors differ from original word2vec'
+fi

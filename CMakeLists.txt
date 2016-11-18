@@ -40,6 +40,19 @@ TARGET_LINK_LIBRARIES(word2vec m pthread)
 
 ## tests
 ENABLE_TESTING()
-ADD_TEST(NAME single_thread_original
+SET(W2V_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests
+  CACHE FILEPATH "Default directory containing test files")
+SET(W2V_BIN_DIR ${CMAKE_BINARY_DIR}/${EXECUTABLE_OUTPUT_PATH}
+  CACHE FILEPATH "Default directory containing built executables")
+
+ADD_TEST(NAME word2vec_compatibility
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
-  COMMAND test_1.test ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_OUTPUT_PATH}/word2vec)
+  COMMAND tap-driver.sh --test-name word2vec_compatibility
+  --trs-file /dev/stdout --log-file /dev/stderr
+  --color-tests yes -- ${W2V_TEST_DIR}/test_0.test ${W2V_BIN_DIR}/word2vec)
+
+ADD_TEST(NAME short_lines
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
+  COMMAND tap-driver.sh --test-name word2vec_compatibility
+  --trs-file /dev/stdout --log-file /dev/stderr
+  --color-tests yes -- ${W2V_TEST_DIR}/test_1.test ${W2V_BIN_DIR}/word2vec)

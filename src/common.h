@@ -118,6 +118,10 @@ typedef struct {
    */
   real *m_syn0;
   /**
+   * \brief Isolated task-specific word embeddings used in least-squares method.
+   */
+  real *m_ts_syn0;
+  /**
    * \brief Word embedding 2 output layer for hierarchical softmax.
    */
   real *m_syn1;

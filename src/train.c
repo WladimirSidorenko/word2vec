@@ -68,6 +68,8 @@ static void reset_nnet(nnet_t *a_nnet) {
   /*@null@*/
   a_nnet->m_syn0 = NULL;
   /*@null@*/
+  a_nnet->m_ts_syn0 = NULL;
+  /*@null@*/
   a_nnet->m_syn1 = NULL;
   /*@null@*/
   a_nnet->m_syn1neg = NULL;
@@ -78,6 +80,7 @@ static void reset_nnet(nnet_t *a_nnet) {
 
 static void free_nnet(nnet_t *a_nnet) {
   free(a_nnet->m_syn0);
+  free(a_nnet->m_ts_syn0);
   free(a_nnet->m_syn1);
   free(a_nnet->m_syn1neg);
 
@@ -130,15 +133,25 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
   }
 
   /* initialize array for storing task-specific embeddings */
-  if (a_opts->m_ts > 0) {
-    a = posix_memalign((void **) &a_nnet->m_syn0, 128,
-                       (long long) vocab_size
-                       * layer1_size * sizeof(real));
+  void **layer_address = NULL;
+
+  if (a_opts->m_ts_w2v > 0)
+    return;
+  else if (a_opts->m_ts > 0)
+    layer_address = (void **) &a_nnet->m_syn0;
+  else if (a_opts->m_ts_least_sq > 0)
+    layer_address = (void **) &a_nnet->m_ts_syn0;
+
+  if (layer_address) {
+    a = posix_memalign(layer_address, 128,
+                       (long long) vocab_size * layer1_size * sizeof(real));
+    real *layer = (real *) (*layer_address);
+
     for (a = 0; a < vocab_size; ++a) {
       for (b = 0; b < layer1_size; ++b) {
         next_random = next_random * (unsigned long long)25214903917 + 11;
-        a_nnet->m_syn0[a * layer1_size + b] = (((next_random & 0xFFFF)
-                                                / (real)65536) - 0.5) / layer1_size;
+        layer[a * layer1_size + b] = (((next_random & 0xFFFF)
+                                       / (real)65536) - 0.5) / layer1_size;
       }
     }
   }
@@ -425,8 +438,8 @@ static real train_w2v(const opt_t *w2v_opts,
 static real train_ts(const multiclass_t  *multiclass, long long word,
                      const real alpha, const int active_tasks,
                      const long long layer1_size, const real *exp_table,
-                     nnet_t *nnet) {
-  real f, g, syn0_orig, total_cost = 0;
+                     nnet_t *nnet, real *embeddings) {
+  real f, g, emb_orig, total_cost = 0;
   long long l2, w_idx = word * layer1_size;
   real *label_weights = NULL;
   size_t i;
@@ -442,7 +455,7 @@ static real train_ts(const multiclass_t  *multiclass, long long word,
       pthread_mutex_lock(&tlock);
       /* compute decision */
       for (c = 0; c < layer1_size; ++c)
-        f += nnet->m_syn0[c + w_idx]  * label_weights[l2 + c];
+        f += embeddings[c + w_idx]  * label_weights[l2 + c];
 
       /* compute gradient */
       if (f > MAX_EXP) {
@@ -459,9 +472,9 @@ static real train_ts(const multiclass_t  *multiclass, long long word,
         g *= alpha;
         /* propagate gradient to word embeddings and task-specific coefficients */
         for (c = 0; c < layer1_size; ++c) {
-          syn0_orig = nnet->m_syn0[c + w_idx];
-          nnet->m_syn0[c + w_idx] += g * label_weights[l2 + c];
-          label_weights[l2 + c] += g * syn0_orig;
+          emb_orig = embeddings[c + w_idx];
+          embeddings[c + w_idx] += g * label_weights[l2 + c];
+          label_weights[l2 + c] += g * emb_orig;
         }
         pthread_mutex_unlock(&tlock);
       }
@@ -589,9 +602,14 @@ static void *train_model_thread(void *a_opts) {
     /* train task-specific embeddings */
     if (w2v_opts->m_ts > 0 || w2v_opts->m_ts_w2v > 0) {
       total_cost += train_ts(&multiclass, word, thread_opts->m_alpha,
-                             active_tasks, layer1_size, exp_table, nnet);
+                             active_tasks, layer1_size, exp_table,
+                             nnet, nnet->m_syn0);
+    } else if (w2v_opts->m_ts_least_sq > 0) {
+      total_cost += train_ts(&multiclass, word, thread_opts->m_alpha,
+                             active_tasks, layer1_size, exp_table,
+                             nnet, nnet->m_ts_syn0);
     }
-    /* train plain word2vec objective */
+    /* train plain word2vec embeddings */
     if (w2v_opts->m_ts <= 0) {
       total_cost += train_w2v(w2v_opts, vocab, vocab_size, exp_table, table, window,
                               layer1_size, nnet, sen, word, neu1, neu1e, sentence_length,

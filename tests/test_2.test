@@ -1,0 +1,20 @@
+#!/bin/sh
+
+##################################################################
+# Variables
+BIN=${1}
+INPUT_0='test_2.0.in'
+OUTPUT_0='test_2.0.out'
+EXPECTED_0='test_2.0.expected'
+TEST_NAME='task_specific_w2v'
+
+##################################################################
+# Test 0
+echo '1..1'
+${BIN} -ts-w2v 1 -min-count 0 -train "${INPUT_0}" -output "${OUTPUT_0}" -threads 1
+diff -q "${OUTPUT_0}" "${EXPECTED_0}" > /dev/null
+if test $? -eq 0; then
+    echo 'ok 1 # hybrid word vectors trained'
+else
+    echo 'not ok 1 # hybrid word vectors differ from expectations'
+fi

@@ -51,8 +51,20 @@ ADD_TEST(NAME word2vec_compatibility
   --trs-file /dev/stdout --log-file /dev/stderr
   --color-tests yes -- ${W2V_TEST_DIR}/test_0.test ${W2V_BIN_DIR}/word2vec)
 
-ADD_TEST(NAME short_lines
+ADD_TEST(NAME task_specific
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
   COMMAND tap-driver.sh --test-name word2vec_compatibility
   --trs-file /dev/stdout --log-file /dev/stderr
   --color-tests yes -- ${W2V_TEST_DIR}/test_1.test ${W2V_BIN_DIR}/word2vec)
+
+ADD_TEST(NAME task_specific_w2v
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
+  COMMAND tap-driver.sh --test-name word2vec_compatibility
+  --trs-file /dev/stdout --log-file /dev/stderr
+  --color-tests yes -- ${W2V_TEST_DIR}/test_2.test ${W2V_BIN_DIR}/word2vec)
+
+# ADD_TEST(NAME task_specific_least_sq
+#   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
+#   COMMAND tap-driver.sh --test-name word2vec_compatibility
+#   --trs-file /dev/stdout --log-file /dev/stderr
+#   --color-tests yes -- ${W2V_TEST_DIR}/test_3.test ${W2V_BIN_DIR}/word2vec)

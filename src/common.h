@@ -122,6 +122,10 @@ typedef struct {
    */
   real *m_ts_syn0;
   /**
+   * \brief Flags of tokens which were trained during task-specific training.
+   */
+  short *m_ts_syn0_active;
+  /**
    * \brief Word embedding 2 output layer for hierarchical softmax.
    */
   real *m_syn1;

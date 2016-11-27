@@ -15,8 +15,7 @@ TEST_NAME='task_specific'
 # Test 0
 echo '1..2'
 ${BIN} -min-count 0 -train "${INPUT_0}" -output "${OUTPUT_0}" -threads 1
-diff -q "${OUTPUT_0}" "${EXPECTED_0}" > /dev/null
-if test $? -eq 0; then
+if test $? -eq 0 && `diff -q "${OUTPUT_0}" "${EXPECTED_0}" > /dev/null`; then
     echo 'ok 1 # trained word vectors match the task'
 else
     echo 'not ok 1 # trained word vectors do not match the tasks'
@@ -24,8 +23,7 @@ fi
 
 ${BIN} -min-count 0 -iter 500 -size 2 -ts 1 -threads 1 \
     -train "${INPUT_1}" -output "${OUTPUT_1}"
-diff -q "${OUTPUT_1}" "${EXPECTED_1}" > /dev/null
-if test $? -eq 0; then
+if test $? -eq 0 && `diff -q "${OUTPUT_1}" "${EXPECTED_1}" > /dev/null`; then
     echo 'ok 2 # trained word vectors match the task'
 else
     echo 'not ok 2 # trained word vectors do not match the tasks'

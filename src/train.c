@@ -44,6 +44,14 @@ pthread_mutex_t tlock;
 /////////////
 // Methods //
 /////////////
+static void init_mtx(void **a_mtx, long long a_size) {
+  long long ret = posix_memalign(a_mtx, 128, a_size);
+  if (ret) {
+    fprintf(stderr, "Memory allocation failed\n");
+    exit(EXIT_FAILURE);
+  }
+}
+
 static void copy_thread_opts(const thread_opts_t *src_opts,
                              thread_opts_t *trg_opts, long a_thread_id) {
   trg_opts->m_start = clock();
@@ -62,6 +70,16 @@ static void copy_thread_opts(const thread_opts_t *src_opts,
 static void reset_multiclass(multiclass_t *a_multiclass) {
   a_multiclass->m_n_tasks = 0;
   memset(a_multiclass->m_classes, -1, sizeof(int) * MAX_TASKS);
+}
+
+static real *init_exp_table(void) {
+  real *exp_table = (real *) malloc((EXP_TABLE_SIZE + 1) * sizeof(real));
+  int i;
+  for (i = 0; i < EXP_TABLE_SIZE; ++i) {
+    exp_table[i] = exp((i / (real)EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
+    exp_table[i] = exp_table[i] / (exp_table[i] + 1); // Precompute f(x) = x / (x + 1)
+  }
+  return exp_table;
 }
 
 static void reset_nnet(nnet_t *a_nnet) {
@@ -92,16 +110,6 @@ static void free_nnet(nnet_t *a_nnet) {
   reset_nnet(a_nnet);
 }
 
-static real *init_exp_table(void) {
-  real *exp_table = (real *) malloc((EXP_TABLE_SIZE + 1) * sizeof(real));
-  int i;
-  for (i = 0; i < EXP_TABLE_SIZE; ++i) {
-    exp_table[i] = exp((i / (real)EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
-    exp_table[i] = exp_table[i] / (exp_table[i] + 1); // Precompute f(x) = x / (x + 1)
-  }
-  return exp_table;
-}
-
 static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
                          const opt_t *a_opts, const multiclass_t *a_multiclass) {
   unsigned long long next_random = 1;
@@ -114,19 +122,14 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
     fprintf(stderr, "Could not allocate memory for m_vec2task.\n");
     exit(8);
   }
+  long long a, n;
   size_t i;
   real *v2t_layer;
-  long long a, b;
   for (i = 0; i < a_nnet->m_n_tasks; ++i) {
-    a = posix_memalign((void **) &a_nnet->m_vec2task[i], 128,
-                       (long long) a_multiclass->m_classes[i] * layer1_size
-                       * sizeof(real));
-    if (a) {
-      fprintf(stderr, "Could not allocate memory for task-specific coefficients.\n");
-      exit(9);
-    }
+    n = a_multiclass->m_classes[i] * layer1_size;
+    init_mtx((void **) &a_nnet->m_vec2task[i], n * sizeof(real));
     v2t_layer = a_nnet->m_vec2task[i];
-    for (a = 0; a < vocab_size; ++a) {
+    for (a = 0; a < n; ++a) {
       next_random = next_random * (unsigned long long)25214903917 + 11;
       v2t_layer[a] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size;
     }
@@ -135,18 +138,18 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
   /* initialize array for storing task-specific embeddings */
   void **layer_address = NULL;
 
-  if (a_opts->m_ts_w2v > 0)
+  if (a_opts->m_ts_w2v > 0) {
     return;
-  else if (a_opts->m_ts > 0)
+  } else if (a_opts->m_ts > 0) {
     layer_address = (void **) &a_nnet->m_syn0;
   else if (a_opts->m_ts_least_sq > 0)
     layer_address = (void **) &a_nnet->m_ts_syn0;
 
   if (layer_address) {
-    a = posix_memalign(layer_address, 128,
-                       (long long) vocab_size * layer1_size * sizeof(real));
+    init_mtx(layer_address,
+	     vocab_size * layer1_size * sizeof(real));
     real *layer = (real *) (*layer_address);
-
+    long long b;
     for (a = 0; a < vocab_size; ++a) {
       for (b = 0; b < layer1_size; ++b) {
         next_random = next_random * (unsigned long long)25214903917 + 11;
@@ -162,34 +165,18 @@ static void init_w2v_nnet(nnet_t *a_nnet, const vocab_t *a_vocab, const opt_t *a
   unsigned long long next_random = 1;
   long long vocab_size = a_vocab->m_vocab_size;
   long long layer1_size = a_opts->m_layer1_size;
-  a = posix_memalign((void **) &a_nnet->m_syn0, 128,
-                     (long long) vocab_size
-                     * layer1_size * sizeof(real));
+  init_mtx((void **) &a_nnet->m_syn0, vocab_size * layer1_size * sizeof(real));
 
-  if (a) {
-    fprintf(stderr, "Memory allocation failed\n");
-    exit(1);
-  }
   if (a_opts->m_hs) {
-    a = posix_memalign((void **)&a_nnet->m_syn1, 128,
-                       (long long) vocab_size
-                       * layer1_size * sizeof(real));
-    if (a) {
-      fprintf(stderr, "Memory allocation failed\n");
-      exit(1);
-    }
+    init_mtx((void **) &a_nnet->m_syn1,
+	     vocab_size * layer1_size * sizeof(real));
     for (a = 0; a < vocab_size; ++a)
       for (b = 0; b < layer1_size; ++b)
         a_nnet->m_syn1[a * layer1_size + b] = 0;
   }
   if (a_opts->m_negative > 0) {
-    a = posix_memalign((void **)&a_nnet->m_syn1neg, 128,
-                       (long long)vocab_size
-                       * layer1_size * sizeof(real));
-    if (a) {
-      fprintf(stderr, "Memory allocation failed\n");
-      exit(1);
-    }
+    init_mtx((void **) &a_nnet->m_syn1neg,
+	     vocab_size * layer1_size * sizeof(real));
     for (a = 0; a < vocab_size; ++a)
       for (b = 0; b < layer1_size; ++b)
         a_nnet->m_syn1neg[a * layer1_size + b] = 0;
@@ -519,7 +506,15 @@ static void *train_model_thread(void *a_opts) {
   clock_t now;
 
   FILE *fi = fopen(w2v_opts->m_train_file, "rb");
-  fseek(fi, file_size / (long long) num_threads * (long long) next_random, SEEK_SET);
+  long offset = 1 + (long long) next_random * file_size / (long long) num_threads;
+  /* proceed to the beginning of the line */
+  do {
+    fseek(fi, --offset, SEEK_SET);
+  } while (offset > 0 && fgetc(fi) != '\n');
+
+  if (offset > 0)
+    ++offset;
+
   while (1) {
     if (word_count - last_word_count > 10000) {
       word_count_actual += word_count - last_word_count;
@@ -571,6 +566,7 @@ static void *train_model_thread(void *a_opts) {
       if (!consume_tab) {
         active_tasks = read_tags(fi, &multiclass);
         if (active_tasks < 0) {
+	  fprintf(stderr, "No active tasks found.\n");
           exit(EXIT_FAILURE);
         /* skip lines for which no active tasks are defined */
         } else if (active_tasks == 0 && w2v_opts->m_ts > 0) {
@@ -592,7 +588,7 @@ static void *train_model_thread(void *a_opts) {
       word_count = 0;
       last_word_count = 0;
       sentence_length = 0;
-      fseek(fi, file_size / (long long)num_threads * thread_id, SEEK_SET);
+      fseek(fi, offset, SEEK_SET);
       continue;
     }
     word = sen[sentence_position];

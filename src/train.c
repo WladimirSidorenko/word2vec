@@ -127,8 +127,8 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
     exit(8);
   }
   long long a, n;
-  size_t i;
   real *v2t_layer;
+  size_t i;
   for (i = 0; i < a_nnet->m_n_tasks; ++i) {
     n = a_multiclass->m_classes[i] * layer1_size;
     init_mtx((void **) &a_nnet->m_vec2task[i], n * sizeof(real));
@@ -149,7 +149,7 @@ static void init_ts_nnet(nnet_t *a_nnet, const vocab_t *a_vocab,
   } else if (a_opts->m_ts_least_sq > 0) {
     a_nnet->m_ts_syn0_active = calloc(vocab_size, sizeof(short));
     if (a_nnet->m_ts_syn0_active == NULL) {
-      fprintf(stderr, "Could not allocate memory for m_vec2task.\n");
+      fprintf(stderr, "Could not allocate memory for m_ts_syn0_active.\n");
       exit(EXIT_FAILURE);
     }
     layer_address = (void **) &a_nnet->m_ts_syn0;
@@ -480,22 +480,61 @@ static real train_ts(const multiclass_t  *multiclass, long long word,
   return total_cost;
 }
 
+static void project_w2v2ts(long long a_vocab_size, long long a_layer_size,
+			   const real *a_w2v2ts, nnet_t *a_nnet) {
+  long long i, w_i, j, w_j, k;
+  real *irow;
+  real *wbench = calloc(a_layer_size, sizeof(real));
+  if (wbench == NULL) {
+    fprintf(stderr, "Could not allocate space for workbench.\n");
+    exit(EXIT_FAILURE);
+  }
+
+  for (i = 0; i < a_vocab_size; ++i) {
+    w_i = i * a_layer_size;
+    /* For tokens encountered during task-specific training, keep
+       their task-specific representation.  Otherwise, perform linear
+       projection of word2vec vectors to specific tasks. */
+    /* fprintf(stderr, */
+    /* 	    "a_nnet->m_ts_syn0_active[%lld] = %hd\n", */
+    /* 	    i, a_nnet->m_ts_syn0_active[i]); */
+    if (a_nnet->m_ts_syn0_active[i]) {
+      irow = a_nnet->m_ts_syn0;
+    } else {
+      for (j = 0; j < a_layer_size; ++j) {
+	wbench[j] = 0.;
+	w_j = j * a_layer_size;
+	for (k = 0; k < a_layer_size; ++k) {
+	  wbench[j] += a_nnet->m_ts_syn0[w_i + k] * a_w2v2ts[w_j + k];
+	}
+      }
+      irow = wbench;
+      w_i = 0;
+    }
+
+    for (j = 0; j < a_layer_size; ++j) {
+      a_nnet->m_syn0[w_i + j] = irow[w_i + j];
+    }
+  }
+  free(wbench);
+}
+
 static void finalize_least_sq(long long a_vocab_size, long long a_layer_size,
 			      nnet_t *a_nnet) {
   long long i, w_i, j, w_j, k, n = 0;
+
   /* count the number of words observed for the tasks */
   for (i = 0; i < a_vocab_size; ++i) {
     if (a_nnet->m_ts_syn0_active[i])
       ++n;
   }
-
   /* X will store original word2vec values (covariates) */
   gsl_matrix *X = gsl_matrix_alloc(n, a_layer_size);
   gsl_matrix *COV = gsl_matrix_alloc (a_layer_size, a_layer_size);
   /* each column of task specific embeddings will be considered as the
      objective of least squares (dependent variables) */
   gsl_vector *y = gsl_vector_alloc(n);
-  gsl_vector *w = gsl_vector_alloc (a_layer_size);
+  gsl_vector *w = gsl_vector_alloc (n);
   gsl_vector_set_all(w, 1.);
   gsl_vector *c = gsl_vector_alloc(a_layer_size);
   gsl_multifit_linear_workspace *wspace = gsl_multifit_linear_alloc(n, a_layer_size);
@@ -509,7 +548,7 @@ static void finalize_least_sq(long long a_vocab_size, long long a_layer_size,
       continue;
 
     w_i = i * a_layer_size;
-    for (j = 0; j < a_vocab_size; ++i) {
+    for (j = 0; j < a_layer_size; ++j) {
       gsl_matrix_set(X, k, j, a_nnet->m_syn0[w_i + j]);
     }
     ++k;
@@ -517,21 +556,21 @@ static void finalize_least_sq(long long a_vocab_size, long long a_layer_size,
   /* solve a system of linear equations for each column */
   for (j = 0; j < a_layer_size; ++j) {
     /* copy column to the gsl vector */
-    for (i = 0, k = 0; i < a_layer_size && k < n; ++i) {
+    for (i = 0, k = 0; i < a_vocab_size && k < n; ++i) {
       if (a_nnet->m_ts_syn0_active[i]) {
 	gsl_vector_set(y, k, a_nnet->m_syn0[i * a_layer_size + j]);
 	++k;
       }
     }
     /* solve the system */
-    gsl_vector_set_all(c, 0.1);
+    gsl_vector_set_all(c, 1);
     gsl_multifit_wlinear(X, w, y, c, COV, &chisq, wspace);
     /* copy the solution to the projecton matrix (note, we copy
        columns to rows for efficiency reasons in later
        multiplication) */
     w_j = j * a_layer_size;
     for (i = 0; i < a_layer_size; ++i) {
-      w2v2ts[w_j + i] = gsl_vector_get(c, j);
+      w2v2ts[w_j + i] = gsl_vector_get(c, i);
     }
   }
   gsl_multifit_linear_free(wspace);
@@ -540,6 +579,9 @@ static void finalize_least_sq(long long a_vocab_size, long long a_layer_size,
   gsl_vector_free(y);
   gsl_matrix_free(COV);
   gsl_matrix_free(X);
+
+  project_w2v2ts(a_vocab_size, a_layer_size, w2v2ts, a_nnet);
+  free(w2v2ts);
 }
 
 static void *train_model_thread(void *a_opts) {
@@ -647,9 +689,8 @@ static void *train_model_thread(void *a_opts) {
       }
       sentence_position = 0;
     }
-    if (feof(fi) || (word_count > train_words / num_threads)) {
-      /* fprintf(stderr, "thread %lld [iteration %lld]: total_cost = %f\n", */
-      /*         thread_id, local_iter, total_cost); */
+
+    if (feof(fi) || (word_count > (train_words / num_threads + 1))) {
       word_count_actual += word_count - last_word_count;
       --local_iter;
 
@@ -668,15 +709,17 @@ static void *train_model_thread(void *a_opts) {
       continue;
 
     /* train task-specific embeddings */
-    if (w2v_opts->m_ts > 0 || w2v_opts->m_ts_w2v > 0) {
-      total_cost += train_ts(&multiclass, word, thread_opts->m_alpha,
-                             active_tasks, layer1_size, exp_table,
-                             nnet, nnet->m_syn0);
-    } else if (w2v_opts->m_ts_least_sq > 0) {
-      total_cost += train_ts(&multiclass, word, thread_opts->m_alpha,
-                             active_tasks, layer1_size, exp_table,
-                             nnet, nnet->m_ts_syn0);
-      nnet->m_ts_syn0_active[word] = 1;
+    if (active_tasks) {
+      if (w2v_opts->m_ts > 0 || w2v_opts->m_ts_w2v > 0) {
+	total_cost += train_ts(&multiclass, word, thread_opts->m_alpha,
+			       active_tasks, layer1_size, exp_table,
+			       nnet, nnet->m_syn0);
+      } else if (w2v_opts->m_ts_least_sq > 0) {
+	total_cost += train_ts(&multiclass, word, thread_opts->m_alpha,
+			       active_tasks, layer1_size, exp_table,
+			       nnet, nnet->m_ts_syn0);
+	nnet->m_ts_syn0_active[word] = 1;
+      }
     }
     /* train plain word2vec embeddings */
     if (w2v_opts->m_ts <= 0) {
@@ -718,6 +761,12 @@ void train_model(opt_t *a_opts) {
                                a_opts->m_alpha, a_opts->m_alpha,
                                0, a_opts, &vocab, &nnet,
                                exp_table, ugram_table, multiclass.m_n_tasks};
+  if (vocab.m_train_words == 0) {
+    return;
+  } else if (a_opts->m_num_threads > vocab.m_train_words) {
+    a_opts->m_num_threads = vocab.m_train_words;
+  }
+
   thread_opts_t *ptopts = (thread_opts_t *) malloc(a_opts->m_num_threads
                                                    * sizeof(thread_opts_t));
   pthread_t *pt = (pthread_t *) malloc(a_opts->m_num_threads
@@ -738,7 +787,7 @@ void train_model(opt_t *a_opts) {
 
   if (a_opts->m_ts_least_sq)
     finalize_least_sq(vocab.m_vocab_size,
-		      a_opts->m_layer1_size, &nnet);
+                      a_opts->m_layer1_size, &nnet);
 
   save_embeddings(a_opts, &vocab, &nnet);
   pthread_mutex_destroy(&tlock);

@@ -21,7 +21,8 @@ else
     echo 'not ok 1 # hybrid word vectors differ from expectations'
 fi
 
-${BIN} -ts-w2v 1 -min-count 0 -train "${INPUT_0}" -output "${OUTPUT_1}"
+${BIN} -ts-w2v 1 -min-count 0 -train "${INPUT_0}" -output "${OUTPUT_1}" \
+       -threads 1 -sample 0
 
 if test $? -eq 0 && `diff -q "${OUTPUT_1}" "${EXPECTED_1}" > /dev/null`; then
     echo 'ok 2 # hybrid word vectors trained with multiple threads'

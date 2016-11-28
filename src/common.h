@@ -134,7 +134,7 @@ typedef struct {
    */
   real *m_syn1neg;
   /**
-   * \brief Task-specific layers
+   * \brief Task-specific embeddings (used in the least squares method)
    */
   real *m_syn0_ts;
   /**

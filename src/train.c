@@ -24,16 +24,49 @@
  *
  */
 typedef struct {
+  /**
+   * @brief Start time of the thread
+   */
   clock_t m_start;
+  /**
+   * @brief Total size of the training file
+   */
   size_t m_file_size;
+  /**
+   * @brief Update rate for gradient descent
+   */
   real m_alpha;
+  /**
+   * @brief Initial update rate for gradient descent
+   */
   real m_starting_alpha;
+  /**
+   * @brief Id of the thread
+   */
   long m_thread_id;
+  /**
+   * @brief General trainign options
+   */
   const opt_t *m_w2v_opts;
+  /**
+   * @brief Pointer to vocabulary instance
+   */
   const vocab_t *m_vocab;
+  /**
+   * @brief Pointer to the trained neural net
+   */
   nnet_t *m_nnet;
+  /**
+   * @brief Table with exponents
+   */
   const real *m_exp_table;
+  /**
+   * @brief Unigram table
+   */
   const int *m_ugram_table;
+  /**
+   * @brief Number of user-defined tasks for task-specific mode.
+   */
   size_t m_n_tasks;
 } thread_opts_t;
 

@@ -1,14 +1,10 @@
 /**
- * \file vocab.h
- * \brief Declaration of the \link vocab_t vocabulary struct \endlink and its interface.
+ * @file vocab.h
+ * @brief Declaration of the @link vocab_t vocabulary struct @endlink and its interface.
  */
 
 #ifndef __WORD2VEC_VOCAB_H__
 #define __WORD2VEC_VOCAB_H__
-
-/**
- * @file Declaration of the vocabulary class and its interface.
- */
 
 //////////////
 // Includes //
@@ -26,11 +22,14 @@
 ///////////////
 // Constants //
 ///////////////
-extern const int TABLE_SIZE;
-extern const int MAX_CODE_LENGTH;
-extern const int MAX_SENTENCE_LENGTH;
-extern const int VOCAB_HASH_SIZE;  // Maximum 30 * 0.7 = 21M words in the vocabulary
-extern const char EOS[];
+extern const int TABLE_SIZE;	  /**< size of the unigram table */
+extern const int MAX_CODE_LENGTH; /**< maximum length of a binary
+				     code */
+extern const int MAX_SENTENCE_LENGTH; /**< maximum allowed sentence
+					 length */
+extern const int VOCAB_HASH_SIZE; /**< Maximum 30 * 0.7 = 21M words in
+				      the vocabulary */
+extern const char EOS[];	/**< end-of-sentence mark */
 
 /////////////
 // Structs //
@@ -40,25 +39,24 @@ extern const char EOS[];
  * @brief Single word stored in the vocabulary.
  */
 typedef struct vocab_word {
-  long long cn;
-  int *point;
-  /** String representation of the word.*/
-  char *word;
-  /** Numerical code of the word used for hashing.*/
-  char *code;
-  /** Length of word's code.*/
-  char codelen;
+  long long cn;		     /**< word count  */
+  int *point;		     /**< word's binary code */
+  char *word;	    /**< String representation of the word.*/
+  char *code;	    /**< Numerical code of the word used for
+		       hashing.*/
+  char codelen;			/**< Length of word's code.*/
 } vw_t;
 
 /**
  * @brief Whole vocabulary.
  */
 typedef struct vocab {
-  long long m_vocab_size;
-  long long m_max_vocab_size;
-  long long m_train_words;
-  vw_t *m_vocab;
-  int *m_vocab_hash;
+  long long m_vocab_size;	/**< number of words in vocabulary  */
+  long long m_max_vocab_size;	/**< maximum reserved size for the vocabulary  */
+  long long m_train_words;	/**< number of words used for training */
+  vw_t *m_vocab;		/**< internal word storage */
+  int *m_vocab_hash;		/**< internal mapping from word
+				   strings to hash codes */
 } vocab_t;
 
 /////////////

@@ -33,13 +33,3 @@ void reset_opt(opt_t *opt) {
   opt->m_ts_w2v = 0;
   opt->m_ts_least_sq = 0;
 }
-
-opt_t *create_opt(void) {
-  opt_t *opts = calloc(1, sizeof(opt_t));
-  if (opts == NULL) {
-    fprintf(stderr, "Failed to allocate memory for options.\n");
-    exit(EXIT_FAILURE);
-  }
-  reset_opt(opts);
-  return opts;
-}

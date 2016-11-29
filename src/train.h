@@ -14,8 +14,8 @@
 ////////////
 // Macros //
 ////////////
-#define EXP_TABLE_SIZE 1000
-#define MAX_EXP 6
+#define EXP_TABLE_SIZE 1000	/**< size of the exponents table */
+#define MAX_EXP 6		/**< maximum power for an exponent */
 
 /////////////
 // Structs //
@@ -29,7 +29,6 @@
  * Launch threads to train neural word embeddings on the specified file.
  *
  * @param a_opts - command line options defining training behavior
- * @type opt_t *
  *
  * @return \c void
  */

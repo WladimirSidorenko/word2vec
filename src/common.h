@@ -15,11 +15,11 @@
 // Macros //
 ////////////
 
-/** \brief Maximum length of stored string. */
+/** @brief Maximum length of stored string. */
 # define MAX_STRING 100
-/** \brief Maximum number of user-defined tasks to train. */
+/** @brief Maximum number of user-defined tasks to train. */
 # define MAX_TASKS 1024
-/** \brief Custom macro to prevent warning about unused variables. */
+/** @brief Custom macro to prevent warning about unused variables. */
 # define UNUSED(x) (void)(x)
 
 //////////////
@@ -27,13 +27,13 @@
 //////////////
 
 /**
- * \typedef opt_t
- * \brief command line options
+ * @typedef opt_t
+ * @brief command line options
  */
 typedef struct opt opt_t;
 /**
- * \typedef real
- * \brief default floating point type
+ * @typedef real
+ * @brief default floating point type
  */
 typedef float real;                    // Precision of float numbers
 
@@ -42,8 +42,8 @@ typedef float real;                    // Precision of float numbers
 /////////////
 
 /**
- * \struct multiclass_t
- * \brief Statistics about specific tasks.
+ * @struct multiclass_t
+ * @brief Statistics about specific tasks.
  *
  * This struct holds statistics about user-defined tasks such as the
  * total number of tasks and the maximum number of classes
@@ -51,57 +51,48 @@ typedef float real;                    // Precision of float numbers
  */
 typedef struct {
   /**
-   * Total number of user-defined tasks.
+   * @brief Total number of user-defined tasks.
    */
   size_t m_n_tasks;
   /**
-   * \brief Maximum number or specific labels for each particular task.
+   * @brief Maximum number or specific labels for each particular task.
    */
   int m_classes[MAX_TASKS];
 } multiclass_t;
 
 
 /**
- * \struct opt
- * \brief command line options.
+ * @struct opt
+ * @brief command line options.
  */
 struct opt {
-  char m_train_file[MAX_STRING];
-  char m_output_file[MAX_STRING];
+  char m_train_file[MAX_STRING]; /**< name of the input file  */
+  char m_output_file[MAX_STRING]; /**< name of the output file  */
 
-  long long m_layer1_size;
-  long long m_iter;
+  long long m_layer1_size;	/**< dimensionality of the embeddings */
+  long long m_iter;		/**< number of iterations to run */
 
-  real m_alpha;
-  real m_sample;
-
-  int m_binary;
-  int m_cbow;
-  int m_debug_mode;
-  int m_hs;
-  int m_min_count;
-  int m_min_reduce;
+  real m_alpha;			/**< Update rate for gradient descent.  */
+  real m_sample;		/**< randomly discard frequent words
+				   while keeping the ranking same */
+  int m_binary;			/**< Store resulting embeddings in the binary format. */
+  int m_cbow;			/**< Use continuous bag of words if > 0. */
+  int m_debug_mode;		/**< Turn on debug messages. */
+  int m_hs;			/**< Use hierarchical softmax if > 0.  */
+  int m_min_count;		/**< Minimum number of occurrences for a word to be analyzed. */
+  int m_min_reduce;		/**< Reduce vocabulary. */
+  int m_negative;    /**< Use negative sampling for word2vec
+			embeddings */
+  int m_num_threads;		/**< Maximum number of threads to use. */
+  int m_ts;			/**< Train task-specific embeddings only. */
+  int m_window;			/**< Size of context window. */
+  int m_ts_w2v;			/**< Simultaneously train
+				   task-specific and word2vec
+				   embeddings.  */
   /**
-   * \brief Use negative sampling for word2vec embeddings
-   */
-  int m_negative;
-  /**
-   * \brief Maximum number of threads to use
-   */
-  int m_num_threads;
-  /**
-   * \brief Train task-specific embeddings only
-   */
-  int m_ts;
-  /**
-   * \brief Size of context window
-   */
-  int m_window;
-  /**
-   * \brief Simultaneously train task-specific and word2vec embeddings
-   */
-  int m_ts_w2v;
-  /** Train word2vec and task-specific embeddings, applying the
+   * @brief mapword2vec to task-specific vectors using least-squares
+   *
+   *  Train word2vec and task-specific embeddings, applying the
    *  least-squares method in the end to map the former vectors to the
    *  latter representation.
    */
@@ -109,40 +100,43 @@ struct opt {
 };
 
 /**
- * \struct nnet_t
- * \brief Neural network data.
+ * @struct nnet_t
+ * @brief Neural network data.
  */
 typedef struct {
   /**
-   * \brief Actual word embedding layer
+   * @brief Actual word embedding layer.
    */
   real *m_syn0;
   /**
-   * \brief Isolated task-specific word embeddings used in least-squares method.
+   * @brief Isolated task-specific word embeddings used in
+   * least-squares method.
    */
   real *m_ts_syn0;
   /**
-   * \brief Flags of tokens which were trained during task-specific training.
+   * @brief Flags of tokens which were trained during task-specific
+   * training.
    */
   short *m_ts_syn0_active;
   /**
-   * \brief Word embedding 2 output layer for hierarchical softmax.
+   * @brief Word embedding 2 output layer for hierarchical softmax.
    */
   real *m_syn1;
   /**
-   * \brief Word embedding 2 output layer for negative sampling.
+   * @brief Word embedding 2 output layer for negative sampling.
    */
   real *m_syn1neg;
   /**
-   * \brief Task-specific embeddings (used in the least squares method)
+   * @brief Task-specific embeddings (used in the least squares
+   * method)
    */
   real *m_syn0_ts;
   /**
-   * \brief Number of user-defined tasks.
+   * @brief Number of user-defined tasks.
    */
   size_t m_n_tasks;
   /**
-   * \brief Word embedding 2 output layers for specific tasks.
+   * @brief Word embedding 2 output layers for specific tasks.
    */
   real **m_vec2task;
 } nnet_t;
@@ -151,8 +145,14 @@ typedef struct {
 // Methods //
 /////////////
 
+/**
+ * Set options to their default values.
+ *
+ * @param opt - pointer to an #opt struct whose values should be set
+ * to default
+ *
+ * @return \c void
+ */
 void reset_opt(opt_t *opt);
-
-opt_t *create_opt(void);
 
 #endif  /* ifndef WORD2VEC_COMMON_H_ */
